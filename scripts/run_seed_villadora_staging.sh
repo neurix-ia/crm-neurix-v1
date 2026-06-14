@@ -41,14 +41,14 @@ for arg in "${EXTRA_ARGS[@]}"; do
   ARGS_QUOTED+=" $(printf '%q' "$arg")"
 done
 
+# Com --network host o container enxerga os IPs dos Postgres no host Linux.
 $DOCKER run --rm \
-  --add-host=prod-db:"$PROD_IP" \
-  --add-host=staging-db:"$STAGING_IP" \
+  --network host \
   -v "$REPO_DIR:/repo" \
   -w /repo \
   python:3.12-slim \
   bash -c "pip install -q 'psycopg[binary]' && python scripts/seed_villadora_catalog_staging.py \
-    --prod-database-url 'postgresql://postgres:${PROD_PW}@prod-db:5432/postgres' \
-    --staging-database-url 'postgresql://postgres:${STAGING_PW}@staging-db:5432/postgres' \
+    --prod-database-url 'postgresql://postgres:${PROD_PW}@${PROD_IP}:5432/postgres' \
+    --staging-database-url 'postgresql://postgres:${STAGING_PW}@${STAGING_IP}:5432/postgres' \
     --create-staging-user \
     --create-fake-inbox${ARGS_QUOTED}"
