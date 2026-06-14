@@ -161,7 +161,7 @@ async def get_me(
         id=str(user.id),
         email=user.email or "",
         full_name=full_name or (user.user_metadata.get("full_name") if user.user_metadata else None),
-        role=user.role,
+        role=str(user.role) if user.role is not None else None,
         avatar_url=user.user_metadata.get("avatar_url") if user.user_metadata else None,
         is_superadmin=eff.is_superadmin,
         organization_id=organization_id,

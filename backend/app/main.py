@@ -4,12 +4,13 @@ Neurix CRM — FastAPI Application Entry Point
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
 
 from app.config import get_settings
+from app.dependencies import get_supabase
 from app.observability import metrics
 from app.routers import (
     admin_api,
@@ -62,6 +63,20 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    if cfg.DEBUG:
+        from fastapi import Request
+        from fastapi.responses import JSONResponse
+
+        @app.exception_handler(Exception)
+        async def debug_unhandled_exception(request: Request, exc: Exception):
+            if isinstance(exc, HTTPException):
+                raise exc
+            logger.exception("unhandled_exception path=%s", request.url.path)
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc), "error_type": type(exc).__name__, "path": str(request.url.path)},
+            )
+
     # ── CORS ──
     app.add_middleware(
         CORSMiddleware,
@@ -104,6 +119,18 @@ def create_app() -> FastAPI:
             "supabase_configured": bool(cfg.SUPABASE_URL),
             "redis_configured": bool(cfg.REDIS_HOST),
         }
+
+    @app.get("/api/health/db", tags=["Sistema"])
+    async def health_db(supabase=Depends(get_supabase)):
+        """Testa PostgREST com SERVICE_ROLE_KEY (mesmo client das rotas autenticadas)."""
+        try:
+            supabase.table("profiles").select("id").limit(1).execute()
+            return {"db": "ok"}
+        except Exception as exc:
+            payload = {"db": "error", "error_type": type(exc).__name__}
+            if cfg.DEBUG:
+                payload["detail"] = str(exc)
+            return payload
 
     @app.get("/api/metrics", tags=["Sistema"])
     async def metrics_snapshot():

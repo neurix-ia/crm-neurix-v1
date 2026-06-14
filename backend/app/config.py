@@ -5,7 +5,7 @@ Loads settings from environment variables.
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,20 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
+
+    @field_validator(
+        "SUPABASE_URL",
+        "SUPABASE_PUBLIC_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_JWT_SECRET",
+        mode="before",
+    )
+    @classmethod
+    def strip_supabase_env(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     # ── Redis ──
     REDIS_HOST: str = "localhost"
