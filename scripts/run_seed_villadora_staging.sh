@@ -36,6 +36,11 @@ echo "Staging DB: $STAGING_CONTAINER ($STAGING_IP)"
 echo "Repo:       $REPO_DIR"
 echo
 
+ARGS_QUOTED=""
+for arg in "${EXTRA_ARGS[@]}"; do
+  ARGS_QUOTED+=" $(printf '%q' "$arg")"
+done
+
 $DOCKER run --rm \
   --add-host=prod-db:"$PROD_IP" \
   --add-host=staging-db:"$STAGING_IP" \
@@ -46,5 +51,4 @@ $DOCKER run --rm \
     --prod-database-url 'postgresql://postgres:${PROD_PW}@prod-db:5432/postgres' \
     --staging-database-url 'postgresql://postgres:${STAGING_PW}@staging-db:5432/postgres' \
     --create-staging-user \
-    --create-fake-inbox \
-    ${EXTRA_ARGS[*]}"
+    --create-fake-inbox${ARGS_QUOTED}"
