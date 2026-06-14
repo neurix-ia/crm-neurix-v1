@@ -35,6 +35,7 @@ import json
 import subprocess
 import sys
 import uuid
+from decimal import Decimal
 from typing import Any
 
 SENSITIVE_SETTING_FRAGMENTS = (
@@ -251,6 +252,8 @@ def clear_staging_catalog(conn, staging_tenant: uuid.UUID, org_id: uuid.UUID | N
 
 def json_serialize(obj: Any) -> Any:
     if isinstance(obj, uuid.UUID):
+        return str(obj)
+    if isinstance(obj, Decimal):
         return str(obj)
     if hasattr(obj, "isoformat"):
         return obj.isoformat()
