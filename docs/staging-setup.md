@@ -135,7 +135,7 @@ python scripts/apply_migrations.py --database-url "postgresql://postgres:SENHA@H
 3. Branch de deploy: `staging` (criada na Fase 6)
 4. Compose file: `docker-compose.staging.yml`
 5. **Project name / Compose name:** `neurix-crm-staging` (evita conflito de containers com prod)
-6. Rede externa: conectar `dokploy-network` + rede do Supabase staging (`SUPABASE_DOCKER_NETWORK`)
+6. Rede externa: `dokploy-network` + rede do Supabase staging (nome fixo em `docker-compose.staging.yml`, igual prod)
 
 ### Variáveis de ambiente (staging — valores novos onde indicado)
 
@@ -163,9 +163,7 @@ REDIS_PASSWORD=<novo>
 REDIS_DB=0
 
 # Rede Docker do Supabase staging
-SUPABASE_DOCKER_NETWORK=<nome da rede externa do compose supabase staging>
-
-# n8n — chave NOVA (gerar: python -c "import secrets; print(secrets.token_urlsafe(32))")
+# Rede Supabase staging: editar nome fixo em docker-compose.staging.yml (seção networks.supabase-net) — chave NOVA (gerar: python -c "import secrets; print(secrets.token_urlsafe(32))")
 N8N_API_KEY=<novo>
 
 # WhatsApp — DESLIGADO em staging (deixar vazio ou tokens de instância de teste)

@@ -91,4 +91,6 @@ networks:
     external: true
   supabase-net:
     external: true
-    name: ${SUPABASE_DOCKER_NETWORK}
+    # Dokploy não interpola env vars no YAML do compose — use nome fixo (igual prod).
+    # Confira em: docker network ls | grep supabase
+    name: crmneurix-pre0225supabase-rd7yqp
