@@ -146,6 +146,36 @@ def connect(url: str):
     return psycopg.connect(url, row_factory=dict_row)
 
 
+def staging_connect_urls(password: str, explicit_url: str | None = None) -> list[str]:
+    urls: list[str] = []
+    if explicit_url:
+        urls.append(explicit_url)
+    urls.extend(
+        [
+            f"postgresql://postgres:{password}@/postgres?host=/var/run/postgresql",
+            f"postgresql://postgres:{password}@/postgres?host=/var/lib/postgresql",
+            f"postgresql://postgres:{password}@127.0.0.1:5432/postgres",
+        ]
+    )
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def connect_first(urls: list[str]):
+    last_err: Exception | None = None
+    for url in urls:
+        try:
+            return connect(url), url
+        except Exception as exc:
+            last_err = exc
+    raise last_err or RuntimeError("Falha ao conectar ao Postgres")
+
+
 def fetch_user_id(conn, email: str) -> uuid.UUID | None:
     with conn.cursor() as cur:
         cur.execute(
@@ -530,17 +560,20 @@ def run_phase_export(args) -> int:
 
 
 def run_phase_import(args) -> int:
-    if not args.staging_database_url:
-        print("ERRO: --staging-database-url obrigatório na fase import.", file=sys.stderr)
-        return 1
     if not args.import_file:
         print("ERRO: --import-file obrigatório na fase import.", file=sys.stderr)
         return 1
     with open(args.import_file, encoding="utf-8") as f:
         bundle = json.load(f)
 
+    staging_pw = args.staging_password
+    if not staging_pw and args.staging_container:
+        staging_pw = docker_postgres_password(args.staging_container, args.use_sudo_docker)
+
     print("Fase import — conectando staging...")
-    staging_conn = connect(args.staging_database_url)
+    urls = staging_connect_urls(staging_pw or "", args.staging_database_url)
+    staging_conn, used_url = connect_first(urls)
+    print(f"Conectado staging via: {used_url.split('@')[-1]}")
     staging_tenant = apply_import_bundle(staging_conn, bundle, args)
 
     counts = fetch_rows(
@@ -614,11 +647,9 @@ def main() -> int:
         return run_phase_export(args)
 
     if args.phase == "import":
-        if not args.staging_database_url:
-            args.staging_database_url = (
-                f"postgresql://postgres:"
-                f"{docker_postgres_password(args.staging_container, args.use_sudo_docker)}"
-                f"@127.0.0.1:5432/postgres"
+        if not args.staging_password and args.staging_container:
+            args.staging_password = docker_postgres_password(
+                args.staging_container, args.use_sudo_docker
             )
         return run_phase_import(args)
 

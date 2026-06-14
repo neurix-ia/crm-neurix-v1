@@ -75,7 +75,7 @@ fi
 echo
 echo "=== Fase 2/2: import staging ==="
 $DOCKER run --rm \
-  --network "container:${STAGING_CONTAINER}" \
+  --volumes-from "${STAGING_CONTAINER}" \
   -v "$REPO_DIR:/repo" \
   -v "$SEED_DIR:/seed" \
   -w /repo \
@@ -83,6 +83,6 @@ $DOCKER run --rm \
   bash -c "pip install -q 'psycopg[binary]' && python scripts/seed_villadora_catalog_staging.py \
     --phase import \
     --import-file /seed/catalog.json \
-    --staging-database-url 'postgresql://postgres:${STAGING_PW}@127.0.0.1:5432/postgres' \
+    --staging-password '${STAGING_PW}' \
     --create-staging-user \
     --create-fake-inbox${ARGS_QUOTED}"
