@@ -24,9 +24,18 @@ jwt_header_ok() {
 
 env_from_container() {
   local name="$1"
-  local key="$2"
-  sudo docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-    | sed -n "s/^${key}=//p" | head -n1
+  shift
+  local var
+  for var in "$@"; do
+    local val
+    val="$(sudo docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+      | sed -n "s/^${var}=//p" | head -n1)"
+    if [[ -n "$val" ]]; then
+      printf '%s' "$val"
+      return 0
+    fi
+  done
+  printf ''
 }
 
 echo "=== CRM backend ($CRM_BACKEND) ==="
@@ -39,15 +48,29 @@ echo "SUPABASE_SERVICE_ROLE_KEY=$(prefix "$CRM_SR")"
 if [[ -n "$CRM_SR" ]]; then
   jwt_header_ok "$CRM_SR" && echo "CRM service_role JWT header: OK" || echo "CRM service_role JWT header: INVALIDO"
 fi
+if [[ -n "$CRM_ANON" ]]; then
+  jwt_header_ok "$CRM_ANON" && echo "CRM anon JWT header: OK" || echo "CRM anon JWT header: INVALIDO"
+fi
 
 echo ""
-echo "=== Supabase Kong ($SUPABASE_KONG) — docker inspect ==="
-KONG_SR="$(env_from_container "$SUPABASE_KONG" "SERVICE_ROLE_KEY")"
-KONG_ANON="$(env_from_container "$SUPABASE_KONG" "ANON_KEY")"
+echo "=== Supabase Kong ($SUPABASE_KONG) ==="
+KONG_SR="$(env_from_container "$SUPABASE_KONG" SERVICE_ROLE_KEY SUPABASE_SERVICE_ROLE_KEY)"
+KONG_ANON="$(env_from_container "$SUPABASE_KONG" ANON_KEY SUPABASE_ANON_KEY)"
+KONG_JWT="$(env_from_container "$SUPABASE_KONG" JWT_SECRET SUPABASE_JWT_SECRET)"
 echo "ANON_KEY=$(prefix "$KONG_ANON")"
 echo "SERVICE_ROLE_KEY=$(prefix "$KONG_SR")"
+echo "JWT_SECRET=$(prefix "$KONG_JWT")"
 if [[ -n "$KONG_SR" ]]; then
   jwt_header_ok "$KONG_SR" && echo "Kong service_role JWT header: OK" || echo "Kong service_role JWT header: INVALIDO"
+fi
+if [[ -n "$KONG_ANON" ]]; then
+  jwt_header_ok "$KONG_ANON" && echo "Kong anon JWT header: OK" || echo "Kong anon JWT header: INVALIDO"
+fi
+
+echo ""
+echo "Header esperado (inicio): eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+if [[ -n "$KONG_ANON" ]]; then
+  echo "Header Kong anon (inicio):  ${KONG_ANON:0:36}"
 fi
 
 echo ""
