@@ -59,7 +59,7 @@ services:
     networks:
       - default
       - dokploy-network
-      - supabase-net
+      - crmneurix-pre0225supabase-rd7yqp
 
   worker:
     build: ./backend
@@ -82,13 +82,12 @@ services:
     networks:
       - default
       - dokploy-network
-      - supabase-net
+      - crmneurix-pre0225supabase-rd7yqp
 
 networks:
   default:
     driver: bridge
   dokploy-network:
     external: true
-  supabase-net:
+  crmneurix-pre0225supabase-rd7yqp:
     external: true
-    name: crmneurix-pre0225supabase-rd7yqp
