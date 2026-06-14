@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Roda seed Villadora em 2 fases: export (rede prod) + import (localhost no container staging).
+# Roda seed Villadora: export (rede prod) + render SQL + psql via docker exec no staging.
 # Uso:
 #   cd /tmp/crm-neurix-v1 && bash scripts/run_seed_villadora_staging.sh --dry-run
 #   cd /tmp/crm-neurix-v1 && bash scripts/run_seed_villadora_staging.sh
@@ -33,7 +33,6 @@ primary_stack_network() {
 
 PROD_NET="$(primary_stack_network "$PROD_CONTAINER")"
 PROD_PW="$(container_env "$PROD_CONTAINER" POSTGRES_PASSWORD)"
-STAGING_PW="$(container_env "$STAGING_CONTAINER" POSTGRES_PASSWORD)"
 
 if [[ -z "$PROD_NET" ]]; then
   echo "ERRO: rede Docker do Postgres prod não encontrada." >&2
@@ -42,11 +41,13 @@ fi
 
 mkdir -p "$SEED_DIR"
 EXPORT_FILE="$SEED_DIR/catalog.json"
+IMPORT_SQL="$SEED_DIR/import.sql"
 
 echo "Prod DB:    $PROD_CONTAINER (rede $PROD_NET)"
-echo "Staging DB: $STAGING_CONTAINER (import via 127.0.0.1 no namespace do container)"
+echo "Staging DB: $STAGING_CONTAINER (import via docker exec psql)"
 echo "Repo:       $REPO_DIR"
-echo "Seed file:  $EXPORT_FILE"
+echo "Seed JSON:  $EXPORT_FILE"
+echo "Seed SQL:   $IMPORT_SQL"
 echo
 
 ARGS_QUOTED=""
@@ -54,7 +55,7 @@ for arg in "${EXTRA_ARGS[@]}"; do
   ARGS_QUOTED+=" $(printf '%q' "$arg")"
 done
 
-echo "=== Fase 1/2: export prod ==="
+echo "=== Fase 1/3: export prod ==="
 $DOCKER run --rm \
   --network "$PROD_NET" \
   -v "$REPO_DIR:/repo" \
@@ -73,16 +74,24 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 echo
-echo "=== Fase 2/2: import staging ==="
+echo "=== Fase 2/3: render SQL ==="
 $DOCKER run --rm \
-  --volumes-from "${STAGING_CONTAINER}" \
   -v "$REPO_DIR:/repo" \
   -v "$SEED_DIR:/seed" \
   -w /repo \
   python:3.12-slim \
-  bash -c "pip install -q 'psycopg[binary]' && python scripts/seed_villadora_catalog_staging.py \
-    --phase import \
+  bash -c "python scripts/seed_villadora_catalog_staging.py \
+    --phase render-sql \
     --import-file /seed/catalog.json \
-    --staging-password '${STAGING_PW}' \
+    --sql-out /seed/import.sql \
     --create-staging-user \
-    --create-fake-inbox${ARGS_QUOTED}"
+    --create-fake-inbox"
+
+echo
+echo "=== Fase 3/3: aplicar SQL no staging ==="
+$DOCKER exec -i "$STAGING_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$IMPORT_SQL"
+
+echo
+echo "Concluído. Login: https://crm-staging.wbtech.dev"
+echo "  staging@villadora.com / 123456"
+echo "Nota: image_url pode apontar para storage staging vazio — reenvie imagens se necessário."

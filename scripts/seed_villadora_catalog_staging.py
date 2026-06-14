@@ -559,44 +559,231 @@ def run_phase_export(args) -> int:
     return 0
 
 
-def run_phase_import(args) -> int:
+STAGING_USER_SUBQ = "__STAGING_USER_ID__"
+
+
+def pg_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def staging_user_sql(email: str) -> str:
+    return f"(SELECT id FROM auth.users WHERE lower(trim(email)) = lower({pg_quote(email)}))"
+
+
+def sql_value(col: str, value: Any, email: str) -> str:
+    if value == STAGING_USER_SUBQ:
+        return staging_user_sql(email)
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return f"{pg_quote(json.dumps(value, ensure_ascii=False))}::jsonb"
+    if col.endswith("_id") or col == "id":
+        return f"{pg_quote(str(value))}::uuid"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return pg_quote(str(value))
+
+
+def remap_row_for_sql(
+    row: dict[str, Any],
+    prod_tenant: str,
+    email: str,
+    user_fields: tuple[str, ...] = ("tenant_id",),
+) -> dict[str, Any]:
+    out = dict(row)
+    for field in user_fields:
+        if field in out and str(out[field]) == prod_tenant:
+            out[field] = STAGING_USER_SUBQ
+    if "image_url" in out:
+        out["image_url"] = rewrite_storage_url(out.get("image_url"))
+    return out
+
+
+def sql_upsert(table: str, row: dict[str, Any], email: str, conflict_col: str = "id") -> str:
+    columns = list(row.keys())
+    collist = ", ".join(columns)
+    values = ", ".join(sql_value(c, row[c], email) for c in columns)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c != conflict_col)
+    return (
+        f"INSERT INTO public.{table} ({collist}) VALUES ({values}) "
+        f"ON CONFLICT ({conflict_col}) DO UPDATE SET {updates};"
+    )
+
+
+def render_create_staging_user_sql(email: str, password: str, full_name: str) -> str:
+    return f"""
+DO $create_user$
+DECLARE
+  v_user_id uuid := gen_random_uuid();
+  v_email text := {pg_quote(email)};
+BEGIN
+  IF EXISTS (SELECT 1 FROM auth.users WHERE lower(trim(email)) = lower(trim(v_email))) THEN
+    RETURN;
+  END IF;
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+    confirmation_token, email_change, email_change_token_new, recovery_token, is_super_admin
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    v_user_id, 'authenticated', 'authenticated', v_email,
+    crypt({pg_quote(password)}, gen_salt('bf')), now(),
+    '{{"provider":"email","providers":["email"]}}'::jsonb,
+    jsonb_build_object('full_name', {pg_quote(full_name)}),
+    now(), now(), '', '', '', '', false
+  );
+  INSERT INTO auth.identities (
+    id, provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+  ) VALUES (
+    gen_random_uuid(), v_user_id::text, v_user_id,
+    jsonb_build_object(
+      'sub', v_user_id::text, 'email', v_email,
+      'email_verified', true, 'phone_verified', false
+    ),
+    'email', now(), now(), now()
+  );
+END $create_user$;
+"""
+
+
+def render_import_sql(bundle: dict[str, Any], args) -> str:
+    prod_tenant = bundle["prod_tenant_id"]
+    org_id = bundle.get("org_id")
+    profile_snapshot = bundle.get("profile_snapshot") or {}
+    email = args.staging_email
+    lines = [
+        "BEGIN;",
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+    ]
+    if args.create_staging_user:
+        lines.append(render_create_staging_user_sql(email, args.staging_password, args.staging_full_name))
+
+    su = staging_user_sql(email)
+    org_sql = f"{pg_quote(org_id)}::uuid" if org_id else "NULL"
+    lines.append(
+        f"""
+DO $clear$
+DECLARE v_staging uuid;
+BEGIN
+  SELECT id INTO v_staging FROM auth.users WHERE lower(trim(email)) = lower({pg_quote(email)});
+  IF v_staging IS NULL THEN
+    RAISE EXCEPTION 'Usuário staging não encontrado: %', {pg_quote(email)};
+  END IF;
+  IF {org_sql} IS NOT NULL THEN
+    DELETE FROM public.stage_automations WHERE organization_id = {org_sql};
+  END IF;
+  DELETE FROM public.promotion_products WHERE tenant_id = v_staging;
+  DELETE FROM public.promotions WHERE tenant_id = v_staging;
+  DELETE FROM public.products WHERE tenant_id = v_staging;
+  DELETE FROM public.product_categories WHERE tenant_id = v_staging;
+  DELETE FROM public.pipeline_stages WHERE tenant_id = v_staging;
+  DELETE FROM public.inboxes WHERE tenant_id = v_staging;
+  DELETE FROM public.funnels WHERE tenant_id = v_staging;
+  DELETE FROM public.keyword_rules WHERE tenant_id = v_staging;
+  DELETE FROM public.settings WHERE tenant_id = v_staging;
+END $clear$;
+"""
+    )
+
+    for row in bundle.get("organizations", []):
+        lines.append(sql_upsert("organizations", row, email))
+
+    for table in (
+        "funnels",
+        "pipeline_stages",
+        "product_categories",
+        "products",
+        "promotions",
+        "promotion_products",
+        "keyword_rules",
+    ):
+        for row in bundle.get(table, []):
+            mapped = remap_row_for_sql(row, prod_tenant, email)
+            lines.append(sql_upsert(table, mapped, email))
+
+    for row in bundle.get("settings", []):
+        mapped = remap_row_for_sql(row, prod_tenant, email)
+        lines.append(sql_upsert("settings", mapped, email, conflict_col="id"))
+
+    for row in bundle.get("stage_automations", []):
+        mapped = remap_row_for_sql(row, prod_tenant, email, ("target_user_id", "created_by"))
+        if mapped.get("target_user_id") != STAGING_USER_SUBQ and mapped.get("target_user_id") is not None:
+            mapped["target_user_id"] = STAGING_USER_SUBQ
+        lines.append(sql_upsert("stage_automations", mapped, email))
+
+    company = profile_snapshot.get("company_name") or "Villadora (staging)"
+    lines.append(
+        f"""
+UPDATE public.profiles
+SET company_name = {pg_quote(company)},
+    full_name = {pg_quote(args.staging_full_name)},
+    phones = '[]'::jsonb,
+    organization_id = {org_sql},
+    is_superadmin = false,
+    updated_at = now()
+WHERE id = {su};
+"""
+    )
+
+    if org_id:
+        lines.append(
+            f"""
+DELETE FROM public.organization_members WHERE organization_id = {org_sql};
+INSERT INTO public.organization_members (organization_id, user_id, role)
+VALUES ({org_sql}, {su}, 'admin')
+ON CONFLICT (organization_id, user_id)
+DO UPDATE SET role = 'admin', assigned_funnel_id = NULL;
+"""
+        )
+
+    if args.create_fake_inbox:
+        lines.append(
+            f"""
+INSERT INTO public.inboxes (tenant_id, funnel_id, name, uazapi_settings)
+SELECT {su}, f.id, 'Inbox teste staging', '{{}}'::jsonb
+FROM public.funnels f
+WHERE f.tenant_id = {su}
+  AND lower(trim(f.name)) IN ('funil-1', 'funil 1', 'default')
+  AND NOT EXISTS (
+    SELECT 1 FROM public.inboxes i WHERE i.tenant_id = {su} AND i.funnel_id = f.id
+  )
+ORDER BY f.created_at
+LIMIT 1;
+"""
+        )
+
+    lines.append(
+        f"""
+SELECT 'products' AS t, count(*)::int AS n FROM public.products WHERE tenant_id = {su}
+UNION ALL SELECT 'leads', count(*)::int FROM public.leads WHERE tenant_id = {su}
+UNION ALL SELECT 'crm_clients', count(*)::int FROM public.crm_clients WHERE tenant_id = {su};
+COMMIT;
+"""
+    )
+    return "\n".join(lines)
+
+
+def run_phase_render_sql(args) -> int:
     if not args.import_file:
-        print("ERRO: --import-file obrigatório na fase import.", file=sys.stderr)
+        print("ERRO: --import-file obrigatório.", file=sys.stderr)
         return 1
     with open(args.import_file, encoding="utf-8") as f:
         bundle = json.load(f)
 
-    staging_pw = args.staging_password
-    if not staging_pw and args.staging_container:
-        staging_pw = docker_postgres_password(args.staging_container, args.use_sudo_docker)
+    if args.dry_run:
+        print_bundle_summary(bundle, prefix="Import: ")
+        print("[dry-run] Nenhum SQL gravado.")
+        return 0
+    if not args.sql_out:
+        print("ERRO: --sql-out obrigatório na fase render-sql.", file=sys.stderr)
+        return 1
 
-    print("Fase import — conectando staging...")
-    urls = staging_connect_urls(staging_pw or "", args.staging_database_url)
-    staging_conn, used_url = connect_first(urls)
-    print(f"Conectado staging via: {used_url.split('@')[-1]}")
-    staging_tenant = apply_import_bundle(staging_conn, bundle, args)
-
-    counts = fetch_rows(
-        staging_conn,
-        """
-        SELECT 'products' AS t, count(*)::int AS n FROM public.products WHERE tenant_id = %s
-        UNION ALL SELECT 'leads', count(*)::int FROM public.leads WHERE tenant_id = %s
-        UNION ALL SELECT 'crm_clients', count(*)::int FROM public.crm_clients WHERE tenant_id = %s
-        """,
-        (staging_tenant, staging_tenant, staging_tenant),
-    )
-    print("\nResumo staging:")
-    for row in counts:
-        print(f"  {row['t']}: {row['n']}")
-
-    staging_conn.close()
-    print("\nConcluído. Login: https://crm-staging.wbtech.dev")
-    print(f"  {args.staging_email} / (senha informada)")
-    if not args.dry_run:
-        print(
-            "Nota: image_url pode apontar para storage staging vazio — "
-            "reenvie imagens se necessário."
-        )
+    sql = render_import_sql(bundle, args)
+    with open(args.sql_out, "w", encoding="utf-8") as f:
+        f.write(sql)
+    print(f"SQL de import salvo em {args.sql_out}")
     return 0
 
 
@@ -626,11 +813,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--phase",
-        choices=("export", "import"),
-        help="export= só prod; import= só staging (use o wrapper shell)",
+        choices=("export", "render-sql"),
+        help="export= prod→JSON; render-sql= JSON→SQL (import via docker exec psql)",
     )
     parser.add_argument("--export-file", help="Arquivo JSON de saída (fase export)")
-    parser.add_argument("--import-file", help="Arquivo JSON de entrada (fase import)")
+    parser.add_argument("--import-file", help="Arquivo JSON de entrada (fase render-sql)")
+    parser.add_argument("--sql-out", help="Arquivo SQL de saída (fase render-sql)")
     parser.add_argument(
         "--use-sudo-docker",
         action="store_true",
@@ -646,15 +834,11 @@ def main() -> int:
             )
         return run_phase_export(args)
 
-    if args.phase == "import":
-        if not args.staging_password and args.staging_container:
-            args.staging_password = docker_postgres_password(
-                args.staging_container, args.use_sudo_docker
-            )
-        return run_phase_import(args)
+    if args.phase == "render-sql":
+        return run_phase_render_sql(args)
 
     print(
-        "ERRO: use --phase export ou --phase import, ou rode scripts/run_seed_villadora_staging.sh",
+        "ERRO: use --phase export ou --phase render-sql, ou rode scripts/run_seed_villadora_staging.sh",
         file=sys.stderr,
     )
     return 1
