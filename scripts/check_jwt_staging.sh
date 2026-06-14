@@ -49,6 +49,13 @@ KONG_ANON="$(get_env "$KONG" SUPABASE_ANON_KEY)"
 [ -z "$KONG_ANON" ] && KONG_ANON="$(get_env "$KONG" ANON_KEY)"
 KONG_SR="$(get_env "$KONG" SUPABASE_SERVICE_ROLE_KEY)"
 [ -z "$KONG_SR" ] && KONG_SR="$(get_env "$KONG" SERVICE_ROLE_KEY)"
+if [ -z "$KONG_SR" ]; then
+  for c in supabase-staging-319f-auth supabase-staging-319f-rest; do
+    KONG_SR="$(get_env "$c" SUPABASE_SERVICE_ROLE_KEY)"
+    [ -z "$KONG_SR" ] && KONG_SR="$(get_env "$c" SERVICE_ROLE_KEY)"
+    [ -n "$KONG_SR" ] && break
+  done
+fi
 CRM_ANON="$(sudo docker exec "$CRM" printenv SUPABASE_ANON_KEY 2>/dev/null || true)"
 CRM_SR="$(sudo docker exec "$CRM" printenv SUPABASE_SERVICE_ROLE_KEY 2>/dev/null || true)"
 
@@ -66,7 +73,7 @@ echo "=== Iguais? ==="
 if [ -n "$JWT_SECRET" ] && [ -n "$CRM_SR" ]; then
   echo ""
   echo "=== Assinatura JWT ==="
-  sudo docker exec -e JWT_SECRET="$JWT_SECRET" -e CRM_SR="$CRM_SR" "$CRM" python <<'PY'
+  sudo docker exec -i -e JWT_SECRET="$JWT_SECRET" -e CRM_SR="$CRM_SR" "$CRM" python <<'PY'
 import os
 import jwt
 
@@ -82,7 +89,7 @@ fi
 
 echo ""
 echo "=== Teste PostgREST ==="
-sudo docker exec "$CRM" python <<'PY'
+sudo docker exec -i "$CRM" python <<'PY'
 from app.config import get_settings
 from supabase import create_client
 
