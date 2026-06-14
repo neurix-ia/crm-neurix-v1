@@ -612,7 +612,29 @@ def sql_upsert(table: str, row: dict[str, Any], email: str, conflict_col: str = 
     )
 
 
-def render_create_staging_user_sql(email: str, password: str, full_name: str) -> str:
+def load_staging_columns(path: str | None) -> dict[str, set[str]]:
+    if not path:
+        return {}
+    table_cols: dict[str, set[str]] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            table, cols = line.split("\t", 1)
+            table_cols[table] = {c.strip() for c in cols.split(",") if c.strip()}
+    return table_cols
+
+
+def filter_row_columns(
+    row: dict[str, Any], table: str, staging_columns: dict[str, set[str]]
+) -> dict[str, Any]:
+    allowed = staging_columns.get(table)
+    if not allowed:
+        return row
+    return {k: v for k, v in row.items() if k in allowed}
+
+
     return f"""
 DO $create_user$
 DECLARE
@@ -648,7 +670,11 @@ END $create_user$;
 """
 
 
-def render_import_sql(bundle: dict[str, Any], args) -> str:
+def render_import_sql(
+    bundle: dict[str, Any], args, staging_columns: dict[str, set[str]] | None = None
+) -> str:
+    staging_columns = staging_columns or {}
+    skipped_logged: set[tuple[str, str]] = set()
     prod_tenant = bundle["prod_tenant_id"]
     org_id = bundle.get("org_id")
     profile_snapshot = bundle.get("profile_snapshot") or {}
@@ -688,6 +714,7 @@ END $clear$;
     )
 
     for row in bundle.get("organizations", []):
+        row = filter_row_columns(row, "organizations", staging_columns)
         lines.append(sql_upsert("organizations", row, email))
 
     for table in (
@@ -700,15 +727,24 @@ END $clear$;
         "keyword_rules",
     ):
         for row in bundle.get(table, []):
-            mapped = remap_row_for_sql(row, prod_tenant, email)
+            filtered = filter_row_columns(row, table, staging_columns)
+            if staging_columns.get(table):
+                for col in set(row) - set(filtered):
+                    key = (table, col)
+                    if key not in skipped_logged:
+                        print(f"  SQL skip coluna {table}.{col} (ausente no staging)", file=sys.stderr)
+                        skipped_logged.add(key)
+            mapped = remap_row_for_sql(filtered, prod_tenant, email)
             lines.append(sql_upsert(table, mapped, email))
 
     for row in bundle.get("settings", []):
-        mapped = remap_row_for_sql(row, prod_tenant, email)
+        filtered = filter_row_columns(row, "settings", staging_columns)
+        mapped = remap_row_for_sql(filtered, prod_tenant, email)
         lines.append(sql_upsert("settings", mapped, email, conflict_col="id"))
 
     for row in bundle.get("stage_automations", []):
-        mapped = remap_row_for_sql(row, prod_tenant, email, ("target_user_id", "created_by"))
+        filtered = filter_row_columns(row, "stage_automations", staging_columns)
+        mapped = remap_row_for_sql(filtered, prod_tenant, email, ("target_user_id", "created_by"))
         if mapped.get("target_user_id") != STAGING_USER_SUBQ and mapped.get("target_user_id") is not None:
             mapped["target_user_id"] = STAGING_USER_SUBQ
         lines.append(sql_upsert("stage_automations", mapped, email))
@@ -780,7 +816,9 @@ def run_phase_render_sql(args) -> int:
         print("ERRO: --sql-out obrigatório na fase render-sql.", file=sys.stderr)
         return 1
 
-    sql = render_import_sql(bundle, args)
+    sql = render_import_sql(
+        bundle, args, load_staging_columns(args.staging_columns_file)
+    )
     with open(args.sql_out, "w", encoding="utf-8") as f:
         f.write(sql)
     print(f"SQL de import salvo em {args.sql_out}")
@@ -819,6 +857,10 @@ def main() -> int:
     parser.add_argument("--export-file", help="Arquivo JSON de saída (fase export)")
     parser.add_argument("--import-file", help="Arquivo JSON de entrada (fase render-sql)")
     parser.add_argument("--sql-out", help="Arquivo SQL de saída (fase render-sql)")
+    parser.add_argument(
+        "--staging-columns-file",
+        help="TSV table_name<TAB>col1,col2,... do schema staging (filtra colunas extras de prod)",
+    )
     parser.add_argument(
         "--use-sudo-docker",
         action="store_true",

@@ -75,6 +75,14 @@ fi
 
 echo
 echo "=== Fase 2/3: render SQL ==="
+$DOCKER exec "$STAGING_CONTAINER" psql -U postgres -d postgres -At -F $'\t' -c "
+SELECT c.table_name, string_agg(c.column_name, ',' ORDER BY c.ordinal_position)
+FROM information_schema.columns c
+WHERE c.table_schema = 'public'
+GROUP BY c.table_name
+ORDER BY c.table_name
+" > "$SEED_DIR/staging_columns.tsv"
+
 $DOCKER run --rm \
   -v "$REPO_DIR:/repo" \
   -v "$SEED_DIR:/seed" \
@@ -84,6 +92,7 @@ $DOCKER run --rm \
     --phase render-sql \
     --import-file /seed/catalog.json \
     --sql-out /seed/import.sql \
+    --staging-columns-file /seed/staging_columns.tsv \
     --create-staging-user \
     --create-fake-inbox"
 
