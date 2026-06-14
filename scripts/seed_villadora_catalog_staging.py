@@ -635,6 +635,7 @@ def filter_row_columns(
     return {k: v for k, v in row.items() if k in allowed}
 
 
+def render_create_staging_user_sql(email: str, password: str, full_name: str) -> str:
     return f"""
 DO $create_user$
 DECLARE
