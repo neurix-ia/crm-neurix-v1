@@ -5,25 +5,50 @@ set -euo pipefail
 KONG="${KONG:-supabase-staging-319f-kong}"
 CRM="${CRM:-crmneurix-crm-qhdg2z-backend-1}"
 
-echo "=== Containers ==="
-sudo docker ps --format '{{.Names}}' | grep -E 'staging-319f-kong|crm.*backend' || true
+get_env() {
+  local container="$1"
+  local var="$2"
+  sudo docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | sed -n "s/^${var}=//p" | head -n1
+}
+
+echo "=== Containers staging ==="
+sudo docker ps --format '{{.Names}}' | grep -E 'supabase-staging|crmneurix-crm-qhdg2z-backend' || true
 
 echo ""
-echo "=== JWT_SECRET (staging Kong) ==="
-JWT_SECRET="$(sudo docker exec "$KONG" sh -c 'echo "$JWT_SECRET"' 2>/dev/null || true)"
-if [ -z "$JWT_SECRET" ]; then
-  JWT_SECRET="$(sudo docker exec "$KONG" sh -c 'echo "$SUPABASE_JWT_SECRET"' 2>/dev/null || true)"
+echo "=== JWT_SECRET ==="
+JWT_SECRET=""
+JWT_CONTAINER=""
+JWT_VAR=""
+for container in $(sudo docker ps --format '{{.Names}}' | grep 'supabase-staging' || true); do
+  for var in JWT_SECRET SUPABASE_JWT_SECRET GOTRUE_JWT_SECRET PGRST_JWT_SECRET; do
+    val="$(get_env "$container" "$var")"
+    if [ -n "$val" ]; then
+      JWT_SECRET="$val"
+      JWT_CONTAINER="$container"
+      JWT_VAR="$var"
+      break 2
+    fi
+  done
+done
+
+if [ -n "$JWT_SECRET" ]; then
+  echo "encontrado: container=$JWT_CONTAINER var=$JWT_VAR"
+  echo "len=${#JWT_SECRET}  prefix=${JWT_SECRET:0:8}..."
+else
+  echo "AVISO: JWT_SECRET nao esta nos containers (comum: so no Dokploy)."
+  echo "Abra Dokploy -> stack Supabase staging -> Environment -> JWT_SECRET"
+  echo ""
+  echo "Containers supabase-staging:"
+  sudo docker ps --format '{{.Names}}' | grep supabase-staging || true
 fi
-if [ -z "$JWT_SECRET" ]; then
-  echo "ERRO: JWT_SECRET nao encontrado em $KONG"
-  exit 1
-fi
-echo "len=${#JWT_SECRET}  prefix=${JWT_SECRET:0:8}..."
 
 echo ""
 echo "=== Keys (prefixos) ==="
-KONG_ANON="$(sudo docker exec "$KONG" sh -c 'echo "$SUPABASE_ANON_KEY"' 2>/dev/null || true)"
-KONG_SR="$(sudo docker exec "$KONG" sh -c 'echo "$SUPABASE_SERVICE_ROLE_KEY"' 2>/dev/null || true)"
+KONG_ANON="$(get_env "$KONG" SUPABASE_ANON_KEY)"
+[ -z "$KONG_ANON" ] && KONG_ANON="$(get_env "$KONG" ANON_KEY)"
+KONG_SR="$(get_env "$KONG" SUPABASE_SERVICE_ROLE_KEY)"
+[ -z "$KONG_SR" ] && KONG_SR="$(get_env "$KONG" SERVICE_ROLE_KEY)"
 CRM_ANON="$(sudo docker exec "$CRM" printenv SUPABASE_ANON_KEY 2>/dev/null || true)"
 CRM_SR="$(sudo docker exec "$CRM" printenv SUPABASE_SERVICE_ROLE_KEY 2>/dev/null || true)"
 
@@ -38,28 +63,25 @@ echo "=== Iguais? ==="
 [ "$KONG_SR" = "$CRM_SR" ] && echo "Kong SR == CRM SR: SIM" || echo "Kong SR == CRM SR: NAO"
 [ "$KONG_ANON" = "$CRM_ANON" ] && echo "Kong ANON == CRM ANON: SIM" || echo "Kong ANON == CRM ANON: NAO"
 
-echo ""
-echo "=== Assinatura JWT (CRM service_role vs JWT_SECRET do Kong) ==="
-sudo docker exec -e JWT_SECRET="$JWT_SECRET" -e TOKEN="$CRM_SR" "$CRM" python <<'PY'
+if [ -n "$JWT_SECRET" ] && [ -n "$CRM_SR" ]; then
+  echo ""
+  echo "=== Assinatura JWT ==="
+  sudo docker exec -e JWT_SECRET="$JWT_SECRET" -e CRM_SR="$CRM_SR" "$CRM" python <<'PY'
 import os
 import jwt
 
 secret = os.environ.get("JWT_SECRET", "")
-token = os.environ.get("TOKEN", "")
-if not secret or not token:
-    print("FALHA: JWT_SECRET ou TOKEN vazio")
-    raise SystemExit(1)
+token = os.environ.get("CRM_SR", "")
 try:
     jwt.decode(token, secret, algorithms=["HS256"], options={"verify_aud": False})
-    print("OK: assinatura valida — keys batem com JWT_SECRET do Kong staging")
+    print("OK: assinatura valida")
 except Exception as exc:
     print("FALHA:", exc)
-    print("-> Gere keys com: python3 scripts/generate_supabase_jwt_keys.py SEU_JWT_SECRET")
-    print("-> Atualize Supabase staging E CRM staging com as mesmas keys e redeploy.")
 PY
+fi
 
 echo ""
-echo "=== Teste PostgREST (service role) ==="
+echo "=== Teste PostgREST ==="
 sudo docker exec "$CRM" python <<'PY'
 from app.config import get_settings
 from supabase import create_client
@@ -72,3 +94,10 @@ try:
 except Exception as exc:
     print("ERR:", type(exc).__name__, exc)
 PY
+
+echo ""
+echo "=== Se FALHA / ERR ==="
+echo "1. Dokploy -> Supabase staging -> copie JWT_SECRET"
+echo "2. python3 scripts/generate_supabase_jwt_keys.py 'JWT_SECRET'"
+echo "3. Cole ANON + SERVICE_ROLE no Supabase staging E no CRM staging"
+echo "4. Redeploy Supabase staging, depois CRM backend"
