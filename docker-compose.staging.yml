@@ -1,0 +1,94 @@
+# Neurix CRM — Docker Compose (STAGING)
+# Deploy no Dokploy com project name: neurix-crm-staging
+# Não usa container_name fixo — evita conflito com produção no mesmo host.
+# Redis + Supabase são stacks separadas (ver docs/staging-setup.md).
+
+services:
+  frontend:
+    build:
+      context: ./frontend-next
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://crm-staging.wbtech.dev}
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL:-https://crm-supabase-staging.wbtech.dev}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - default
+      - dokploy-network
+
+  backend:
+    build: ./backend
+    expose:
+      - "8000"
+    environment:
+      - APP_NAME=${APP_NAME:-Neurix CRM [STAGING]}
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - DEBUG=${DEBUG:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://crm-staging.wbtech.dev}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_PUBLIC_URL=${SUPABASE_PUBLIC_URL}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB:-0}
+      - SESSION_DURATION_DAYS=${SESSION_DURATION_DAYS:-14}
+      - TWO_FACTOR_ENABLED=${TWO_FACTOR_ENABLED:-false}
+      - N8N_API_KEY=${N8N_API_KEY}
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-https://crm-staging.wbtech.dev}
+      - UAZAPI_URL=${UAZAPI_URL:-}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN:-}
+      - UAZAPI_INSTANCE_TOKEN=${UAZAPI_INSTANCE_TOKEN:-}
+      - UAZAPI_WEBHOOK_SECRET=${UAZAPI_WEBHOOK_SECRET:-}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - default
+      - dokploy-network
+      - supabase-net
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.workers.webhook_processor"]
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_PUBLIC_URL=${SUPABASE_PUBLIC_URL}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB:-0}
+      - UAZAPI_URL=${UAZAPI_URL:-}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN:-}
+      - UAZAPI_INSTANCE_TOKEN=${UAZAPI_INSTANCE_TOKEN:-}
+      - UAZAPI_WEBHOOK_SECRET=${UAZAPI_WEBHOOK_SECRET:-}
+    restart: unless-stopped
+    networks:
+      - default
+      - dokploy-network
+      - supabase-net
+
+networks:
+  default:
+    driver: bridge
+  dokploy-network:
+    external: true
+  supabase-net:
+    external: true
+    name: ${SUPABASE_DOCKER_NETWORK}
