@@ -552,32 +552,37 @@ def _fetch_leads_for_funnel(
     data_tenant_id: str,
     funnel_id: str,
 ) -> list[dict]:
-    try:
-        response = (
-            supabase.table("leads")
-            .select("*")
-            .eq("tenant_id", data_tenant_id)
-            .eq("archived", False)
-            .eq("deleted", False)
-            .eq("funnel_id", funnel_id)
-            .order("created_at", desc=False)
-            .execute()
-        )
-        return response.data or []
-    except Exception as exc:
-        detail = _db_error_detail(exc)
-        if _is_missing_column_error(detail, "funnel_id"):
-            response = (
+    """Leads do funil; ignora filtros archived/deleted/funnel_id se coluna não existir no schema."""
+    use_archived = True
+    use_deleted = True
+    use_funnel = True
+    while True:
+        try:
+            query = (
                 supabase.table("leads")
                 .select("*")
                 .eq("tenant_id", data_tenant_id)
-                .eq("archived", False)
-                .eq("deleted", False)
-                .order("created_at", desc=False)
-                .execute()
             )
+            if use_archived:
+                query = query.eq("archived", False)
+            if use_deleted:
+                query = query.eq("deleted", False)
+            if use_funnel:
+                query = query.eq("funnel_id", funnel_id)
+            response = query.order("created_at", desc=False).execute()
             return response.data or []
-        raise
+        except Exception as exc:
+            detail = _db_error_detail(exc)
+            if use_archived and _is_missing_column_error(detail, "archived"):
+                use_archived = False
+                continue
+            if use_deleted and _is_missing_column_error(detail, "deleted"):
+                use_deleted = False
+                continue
+            if use_funnel and _is_missing_column_error(detail, "funnel_id"):
+                use_funnel = False
+                continue
+            raise
 
 
 def _sanitize_optional_json_list_dicts(value) -> list[dict] | None:
