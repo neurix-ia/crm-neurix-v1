@@ -13,6 +13,7 @@ from app.dependencies import get_supabase, verify_n8n_api_key
 from app.models.n8n_webhook import (
     N8nWebhookPayload,
     N8nWebhookResponse,
+    OrderItem,
     build_products_json,
     generate_client_name,
     generate_product_summary,
@@ -30,9 +31,10 @@ from app.services.lead_board import (
 )
 from app.services.webhook_lead_context import (
     find_inbox_by_instance_token,
+    get_first_stage_slug_for_funnel,
     resolve_or_create_crm_client,
 )
-from app.services.phone_normalize import digits_only
+from app.services.phone_normalize import digits_only, format_brazil_phone_display
 
 router = APIRouter()
 logger = get_logger("n8n_webhook")
@@ -42,6 +44,11 @@ INTENT_TO_STAGE = {
     "perfil_b2b": "B2B",
     "perfil_revenda": "Quero Vender",
     "pedido": "Pedido Feito",
+}
+
+PROFILE_ALLOWED_CATEGORY_SLUGS = {
+    "PF": ("cliente-final",),
+    "PJ": ("lojista-b2b",),
 }
 
 
@@ -95,6 +102,119 @@ def _resolve_lead(
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Lead não encontrado para este chat. Verifique se o webhook Uazapi já processou a primeira mensagem.",
+    )
+
+
+def _format_lead_phone(phone_raw: str | None, whatsapp_chat_id: str) -> str | None:
+    sender_phone = (phone_raw or "").strip() or whatsapp_chat_id.replace("@s.whatsapp.net", "").replace("@g.us", "")
+    if not sender_phone:
+        return None
+    p = digits_only(sender_phone)
+    if len(p) == 12 and p.startswith("55") and len(p) > 4 and p[4] in "6789":
+        p = p[:4] + "9" + p[4:]
+    return format_brazil_phone_display(p) or p
+
+
+def _create_lead_for_n8n(
+    supabase: SupabaseClient,
+    *,
+    inbox: dict,
+    whatsapp_chat_id: str,
+    lead_name: str | None,
+    phone: str | None,
+) -> dict:
+    """Cria lead no funil da caixa quando o webhook Uazapi→CRM não rodou (fluxo n8n-first)."""
+    tenant_id = str(inbox["tenant_id"])
+    funnel_id = str(inbox["funnel_id"])
+    inbox_id = str(inbox["id"])
+    chat = whatsapp_chat_id.strip()
+
+    stage_slug = get_first_stage_slug_for_funnel(
+        supabase,
+        tenant_id=tenant_id,
+        funnel_id=funnel_id,
+    )
+    formatted_phone = _format_lead_phone(phone, chat)
+    sender_phone_raw = (phone or "").strip() or chat.replace("@s.whatsapp.net", "").replace("@g.us", "")
+    display_name = (lead_name or "").strip() or sender_phone_raw or "Desconhecido"
+
+    client_id: str | None = None
+    if sender_phone_raw:
+        client_id = resolve_or_create_crm_client(
+            supabase,
+            tenant_id=tenant_id,
+            sender_phone_raw=sender_phone_raw,
+            sender_name=lead_name or "",
+        )
+
+    new_lead: dict = {
+        "tenant_id": tenant_id,
+        "inbox_id": inbox_id,
+        "funnel_id": funnel_id,
+        "whatsapp_chat_id": chat,
+        "contact_name": display_name[:500],
+        "company_name": display_name[:500],
+        "phone": formatted_phone,
+        "stage": stage_slug,
+        "value": 0,
+    }
+    if client_id:
+        new_lead["client_id"] = client_id
+
+    try:
+        ins = supabase.table("leads").insert(new_lead).execute()
+        if ins.data:
+            logger.info(
+                "n8n_lead_auto_created",
+                extra={"lead_id": ins.data[0]["id"], "inbox_id": inbox_id, "chat_id": chat},
+            )
+            return ins.data[0]
+    except Exception as exc:
+        logger.exception("n8n_lead_auto_create_failed", extra={"inbox_id": inbox_id, "chat_id": chat})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao criar lead: {exc}",
+        ) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Falha ao criar lead (resposta vazia do banco).",
+    )
+
+
+def _resolve_or_create_lead(
+    supabase: SupabaseClient,
+    *,
+    inbox: dict,
+    whatsapp_chat_id: str,
+    lead_name: str | None,
+    phone: str | None,
+    create_if_missing: bool,
+) -> tuple[dict, bool]:
+    tenant_id = str(inbox["tenant_id"])
+    inbox_id = str(inbox["id"])
+    try:
+        return (
+            _resolve_lead(
+                supabase,
+                inbox_id=inbox_id,
+                tenant_id=tenant_id,
+                whatsapp_chat_id=whatsapp_chat_id,
+            ),
+            False,
+        )
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_404_NOT_FOUND or not create_if_missing:
+            raise
+    return (
+        _create_lead_for_n8n(
+            supabase,
+            inbox=inbox,
+            whatsapp_chat_id=whatsapp_chat_id,
+            lead_name=lead_name,
+            phone=phone,
+        ),
+        True,
     )
 
 
@@ -193,13 +313,177 @@ def _fetch_tenant_products(supabase: SupabaseClient, tenant_id: str) -> list[dic
     try:
         res = (
             supabase.table("products")
-            .select("id, name, price, category_id, tenant_id, is_active")
+            .select("id, name, price, category, category_id, tenant_id, is_active")
             .eq("tenant_id", tenant_id)
             .execute()
         )
         return res.data or []
     except Exception:
         return []
+
+
+def _normalize_person_type(person_type: str | None) -> str | None:
+    normalized = str(person_type or "").strip().upper()
+    return normalized if normalized in PROFILE_ALLOWED_CATEGORY_SLUGS else None
+
+
+def _resolve_profile_from_stage(stage_name: str | None) -> str | None:
+    normalized_stage = str(stage_name or "").strip().lower()
+    if normalized_stage == "b2b":
+        return "PJ"
+    if normalized_stage == "b2c":
+        return "PF"
+    return None
+
+
+def _fetch_client_person_type(
+    supabase: SupabaseClient,
+    *,
+    tenant_id: str,
+    client_id: str | None,
+) -> str | None:
+    if not client_id:
+        return None
+
+    try:
+        response = (
+            supabase.table("crm_clients")
+            .select("person_type")
+            .eq("tenant_id", tenant_id)
+            .eq("id", client_id)
+            .execute()
+        )
+    except Exception:
+        return None
+
+    row = (response.data or [None])[0]
+    if not row:
+        return None
+    return _normalize_person_type(row.get("person_type"))
+
+
+def _resolve_effective_order_profile(
+    supabase: SupabaseClient,
+    *,
+    lead_row: dict,
+    tenant_id: str,
+) -> str:
+    client_person_type = _fetch_client_person_type(
+        supabase,
+        tenant_id=tenant_id,
+        client_id=str(lead_row.get("client_id") or "").strip() or None,
+    )
+    if client_person_type:
+        return client_person_type
+
+    stage_person_type = _resolve_profile_from_stage(lead_row.get("stage"))
+    if stage_person_type:
+        return stage_person_type
+
+    return "PF"
+
+
+def _fetch_allowed_category_ids(
+    supabase: SupabaseClient,
+    *,
+    tenant_id: str,
+    allowed_category_slugs: tuple[str, ...],
+) -> tuple[set[str], bool]:
+    try:
+        response = (
+            supabase.table("product_categories")
+            .select("id, slug")
+            .eq("tenant_id", tenant_id)
+            .in_("slug", list(allowed_category_slugs))
+            .execute()
+        )
+    except Exception:
+        return set(), False
+
+    category_ids = {
+        str(row["id"])
+        for row in (response.data or [])
+        if row.get("id")
+    }
+    return category_ids, True
+
+
+def _filter_products_by_allowed_categories(
+    products_db: list[dict],
+    *,
+    allowed_category_ids: set[str],
+    allowed_category_slugs: tuple[str, ...],
+    category_lookup_available: bool,
+) -> list[dict]:
+    allowed_slugs = {slug.strip().lower() for slug in allowed_category_slugs}
+    filtered_products: list[dict] = []
+
+    for product in products_db:
+        product_category_id = str(product.get("category_id") or "").strip()
+        product_category_slug = str(product.get("category") or "").strip().lower()
+
+        if category_lookup_available:
+            if product_category_id and product_category_id in allowed_category_ids:
+                filtered_products.append(product)
+            continue
+
+        if product_category_slug in allowed_slugs:
+            filtered_products.append(product)
+
+    return filtered_products
+
+
+def _build_unmatched_order_line(item: OrderItem) -> dict:
+    line_total = parse_brl_to_float(item.total)
+    unit_price = round(line_total / max(item.quantity, 1), 2) if line_total > 0 else 0.0
+    if line_total <= 0:
+        line_total = round(unit_price * item.quantity, 2)
+
+    return {
+        "id": "",
+        "product_id": item.product_id or "",
+        "name": item.product,
+        "price": unit_price,
+        "quantity": item.quantity,
+        "qty": item.quantity,
+        "category_id": None,
+        "line_subtotal": round(unit_price * item.quantity, 2),
+        "line_discount": 0.0,
+        "line_total": line_total,
+        "applied_promotion_name": None,
+        "unmatched": True,
+    }
+
+
+def _separate_disallowed_product_id_items(
+    items: list[OrderItem],
+    *,
+    all_products_by_id: dict[str, dict],
+    allowed_product_ids: set[str],
+    effective_profile: str,
+) -> tuple[list[OrderItem], list[dict], list[str]]:
+    items_for_catalog_match: list[OrderItem] = []
+    forced_unmatched_lines: list[dict] = []
+    warnings: list[str] = []
+
+    for item in items:
+        product_id = str(item.product_id or "").strip()
+        if not product_id:
+            items_for_catalog_match.append(item)
+            continue
+
+        catalog_product = all_products_by_id.get(product_id)
+        if catalog_product and product_id not in allowed_product_ids:
+            warnings.append(
+                f"Produto '{item.product}' (product_id '{product_id}') não pertence ao catálogo "
+                f"permitido para o perfil {effective_profile} e foi tratado como item sem match."
+            )
+            forced_unmatched_lines.append(_build_unmatched_order_line(item))
+            continue
+
+        items_for_catalog_match.append(item)
+
+    return items_for_catalog_match, forced_unmatched_lines, warnings
 
 
 def _update_products_json(
@@ -214,8 +498,45 @@ def _update_products_json(
     if not payload.order_summary:
         return lead_row.get("products_json") or [], []
 
-    products_db = _fetch_tenant_products(supabase, tenant_id)
-    raw_lines, warnings = build_products_json(payload.order_summary, products_db, tenant_id)
+    effective_profile = _resolve_effective_order_profile(
+        supabase,
+        lead_row=lead_row,
+        tenant_id=tenant_id,
+    )
+    allowed_category_slugs = PROFILE_ALLOWED_CATEGORY_SLUGS[effective_profile]
+
+    all_products_db = _fetch_tenant_products(supabase, tenant_id)
+    allowed_category_ids, category_lookup_available = _fetch_allowed_category_ids(
+        supabase,
+        tenant_id=tenant_id,
+        allowed_category_slugs=allowed_category_slugs,
+    )
+    products_db = _filter_products_by_allowed_categories(
+        all_products_db,
+        allowed_category_ids=allowed_category_ids,
+        allowed_category_slugs=allowed_category_slugs,
+        category_lookup_available=category_lookup_available,
+    )
+    all_products_by_id = {
+        str(product.get("id") or ""): product
+        for product in all_products_db
+        if product.get("id")
+    }
+    allowed_product_ids = {
+        str(product.get("id") or "")
+        for product in products_db
+        if product.get("id")
+    }
+    matchable_items, forced_unmatched_lines, forced_warnings = _separate_disallowed_product_id_items(
+        payload.order_summary,
+        all_products_by_id=all_products_by_id,
+        allowed_product_ids=allowed_product_ids,
+        effective_profile=effective_profile,
+    )
+
+    raw_lines, warnings = build_products_json(matchable_items, products_db, tenant_id)
+    warnings.extend(forced_warnings)
+    raw_lines.extend(forced_unmatched_lines)
     matched_lines, unmatched_lines = partition_products_by_match(raw_lines)
     products_json = matched_lines
 
@@ -360,14 +681,21 @@ async def n8n_webhook(
     funnel_id = str(inbox["funnel_id"])
     inbox_id = str(inbox["id"])
 
-    lead_row = _resolve_lead(
+    profile_intents = ("perfil_b2c", "perfil_b2b", "perfil_revenda")
+    lead_row, lead_created = _resolve_or_create_lead(
         supabase,
-        inbox_id=inbox_id,
-        tenant_id=tenant_id,
+        inbox=inbox,
         whatsapp_chat_id=payload.whatsapp_chat_id,
+        lead_name=payload.lead_name,
+        phone=payload.phone,
+        create_if_missing=payload.intent in profile_intents,
     )
     lead_id = str(lead_row["id"])
     warnings: list[str] = []
+    if lead_created:
+        warnings.append(
+            "Lead criado automaticamente pelo n8n (webhook Uazapi→CRM não havia processado este contato)."
+        )
 
     _append_note_timeline(supabase, lead_row=lead_row, payload=payload)
 

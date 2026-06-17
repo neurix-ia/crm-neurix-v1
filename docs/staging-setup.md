@@ -277,6 +277,8 @@ Checklist de aceite:
 
 ## Promover alteração para produção
 
+Ver guia completo: [`staging-to-prod-promotion.md`](./staging-to-prod-promotion.md).
+
 1. Dev abre PR `staging` → `main` (ou você faz merge após testar staging)
 2. **VOCÊ:** backup do Supabase prod (Dokploy/snapshot)
 3. Se o PR inclui arquivo em `backend/migrations/`: rodar migration em **prod** na ordem
@@ -297,6 +299,7 @@ Checklist de aceite:
 - `docker-compose.staging.yml` — compose para Dokploy staging
 - `backend/.env.staging.example` — template de variáveis
 - `scripts/apply_migrations.py` — aplicar SQL em ordem
+- [`staging-to-prod-promotion.md`](./staging-to-prod-promotion.md) — **promover melhorias staging → prod (dev)**
 - `docs/supabase_smtp_config.md` — SMTP Auth
 - `docs/uazapi_webhook_setup.md` — só se habilitar WhatsApp em staging
 

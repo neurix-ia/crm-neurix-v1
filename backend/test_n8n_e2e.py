@@ -43,6 +43,8 @@ FAKE_LEAD_ID = "lead-uuid-0001"
 FAKE_STAGE_ID = "stage-uuid-b2c"
 FAKE_CHAT_ID = "554195802989@s.whatsapp.net"
 FAKE_PRODUCT_ID = "product-uuid-geleia"
+FAKE_CATEGORY_CLIENTE_FINAL_ID = "cat-cliente-final"
+FAKE_CATEGORY_LOJISTA_ID = "cat-lojista-b2b"
 
 INBOX_ROW = {
     "id": FAKE_INBOX_ID,
@@ -78,9 +80,20 @@ PRODUCT_DB_ROW = {
     "id": FAKE_PRODUCT_ID,
     "name": "Geleia de Amora",
     "price": 18.0,
-    "category_id": "cat-01",
+    "category_id": FAKE_CATEGORY_CLIENTE_FINAL_ID,
+    "category": "cliente-final",
     "tenant_id": FAKE_TENANT_ID,
     "is_active": True,
+}
+
+CATEGORY_CLIENTE_FINAL_ROW = {
+    "id": FAKE_CATEGORY_CLIENTE_FINAL_ID,
+    "slug": "cliente-final",
+}
+
+CATEGORY_LOJISTA_ROW = {
+    "id": FAKE_CATEGORY_LOJISTA_ID,
+    "slug": "lojista-b2b",
 }
 
 
@@ -676,6 +689,46 @@ class TestN8nIntentRouting(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertIn("Lead não encontrado", ctx.exception.detail)
 
+    def test_resolve_or_create_lead_creates_when_profile_intent_and_missing(self):
+        from app.routers.n8n_webhook import _resolve_or_create_lead
+
+        sb = MagicMock()
+        empty = _FakeExec(data=[])
+        created = _FakeExec(data=[{**LEAD_ROW, "id": "new-lead-id"}])
+        sb.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.side_effect = [
+            empty,
+            empty,
+        ]
+        sb.table.return_value.insert.return_value.execute.return_value = created
+        with patch("app.routers.n8n_webhook.get_first_stage_slug_for_funnel", return_value="Contato Inicial"):
+            with patch("app.routers.n8n_webhook.resolve_or_create_crm_client", return_value=None):
+                row, created_flag = _resolve_or_create_lead(
+                    sb,
+                    inbox=INBOX_ROW,
+                    whatsapp_chat_id=FAKE_CHAT_ID,
+                    lead_name="Augusto",
+                    phone="+55 41 9580-2989",
+                    create_if_missing=True,
+                )
+        self.assertTrue(created_flag)
+        self.assertEqual(row["id"], "new-lead-id")
+
+    def test_resolve_or_create_lead_raises_when_not_profile_and_missing(self):
+        from app.routers.n8n_webhook import _resolve_or_create_lead
+
+        sb = MagicMock()
+        sb.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = _FakeExec(data=[])
+        with self.assertRaises(HTTPException) as ctx:
+            _resolve_or_create_lead(
+                sb,
+                inbox=INBOX_ROW,
+                whatsapp_chat_id="unknown@chat",
+                lead_name=None,
+                phone=None,
+                create_if_missing=False,
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+
     def test_resolve_stage_case_insensitive(self):
         from app.routers.n8n_webhook import _resolve_stage_case_insensitive
         sb = MagicMock()
@@ -707,6 +760,40 @@ class TestIntentStageMapping(unittest.TestCase):
         self.assertEqual(INTENT_TO_STAGE["perfil_b2b"], "B2B")
         self.assertEqual(INTENT_TO_STAGE["perfil_revenda"], "Quero Vender")
         self.assertEqual(INTENT_TO_STAGE["pedido"], "Pedido Feito")
+
+
+class TestCommercialProfileResolution(unittest.TestCase):
+    def test_prefers_linked_client_person_type_over_stage(self):
+        from app.routers.n8n_webhook import _resolve_effective_order_profile
+
+        sb = MagicMock()
+        sb.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = _FakeExec(
+            data=[{"person_type": "PJ"}]
+        )
+
+        profile = _resolve_effective_order_profile(
+            sb,
+            lead_row={**LEAD_ROW, "client_id": "client-uuid", "stage": "B2C"},
+            tenant_id=FAKE_TENANT_ID,
+        )
+        self.assertEqual(profile, "PJ")
+
+    def test_falls_back_to_stage_and_then_pf(self):
+        from app.routers.n8n_webhook import _resolve_effective_order_profile
+
+        profile_from_stage = _resolve_effective_order_profile(
+            MagicMock(),
+            lead_row={**LEAD_ROW, "client_id": None, "stage": "B2B"},
+            tenant_id=FAKE_TENANT_ID,
+        )
+        profile_default = _resolve_effective_order_profile(
+            MagicMock(),
+            lead_row={**LEAD_ROW, "client_id": None, "stage": "Novo"},
+            tenant_id=FAKE_TENANT_ID,
+        )
+
+        self.assertEqual(profile_from_stage, "PJ")
+        self.assertEqual(profile_default, "PF")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -874,6 +961,7 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         responses = deque(
             [
                 _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
                 MagicMock(data=lead_snap),
                 _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
             ]
@@ -927,6 +1015,7 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         responses = deque(
             [
                 _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
                 MagicMock(data=lead_snap),
                 _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
             ]
@@ -963,6 +1052,7 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         responses = deque(
             [
                 _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
                 MagicMock(data=lead_snap),
                 _FakeExec(data=[{"id": FAKE_LEAD_ID}]),
             ]
@@ -1002,6 +1092,7 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         responses = deque(
             [
                 _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
                 MagicMock(data=lead_snap),
                 _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
             ]
@@ -1053,6 +1144,7 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         responses = deque(
             [
                 _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
                 MagicMock(data=lead_snap),
                 _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
             ]
@@ -1077,6 +1169,173 @@ class TestUpdateProductsJsonStock(unittest.TestCase):
         self.assertEqual(mock_apply.call_args.kwargs["delta"], {})
         self.assertEqual(captured[0]["value"], 0.0)
         self.assertIn("- 3x Só Órfão", captured[0]["notes"])
+
+    @patch("app.routers.n8n_webhook.apply_stock_delta")
+    def test_cart_update_filters_products_by_pf_catalog(self, mock_apply):
+        from app.routers.n8n_webhook import _update_products_json
+
+        catalog = [
+            {**PRODUCT_DB_ROW, "name": "Geleia PF"},
+            {
+                "id": "prod-lojista",
+                "name": "Combo Lojista",
+                "price": 45.0,
+                "category_id": FAKE_CATEGORY_LOJISTA_ID,
+                "category": "lojista-b2b",
+                "tenant_id": FAKE_TENANT_ID,
+                "is_active": True,
+            },
+        ]
+        lead_snap = {
+            "id": FAKE_LEAD_ID,
+            "tenant_id": FAKE_TENANT_ID,
+            "products_json": [],
+            "stock_reserved_json": [],
+            "notes": "",
+        }
+        captured: list[dict] = []
+        responses = deque(
+            [
+                _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
+                MagicMock(data=lead_snap),
+                _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
+            ]
+        )
+        sb = _make_supabase_for_update_products_json(responses, capture_updates=captured)
+
+        payload = N8nWebhookPayload(
+            instance_token="t",
+            whatsapp_chat_id=FAKE_CHAT_ID,
+            intent="cart_update",
+            order_summary=[
+                OrderItem(product="Geleia PF", quantity=1, total="R$ 18,00"),
+                OrderItem(product="Combo Lojista", quantity=2, total="R$ 90,00"),
+            ],
+            total_value="R$ 108,00",
+        )
+        lead_row = {**LEAD_ROW, "stage": "B2C", "client_id": None}
+        products_json, warnings = _update_products_json(
+            sb, lead_row=lead_row, payload=payload, tenant_id=FAKE_TENANT_ID,
+        )
+
+        self.assertEqual(len(products_json), 1)
+        self.assertEqual(products_json[0]["name"], "Geleia PF")
+        self.assertEqual(mock_apply.call_args.kwargs["delta"], {FAKE_PRODUCT_ID: 1})
+        self.assertTrue(any("não encontrado" in warning for warning in warnings))
+        self.assertIn("Combo Lojista", captured[0]["notes"])
+
+    @patch("app.routers.n8n_webhook.apply_stock_delta")
+    def test_linked_pj_client_overrides_stage_for_catalog_filter(self, mock_apply):
+        from app.routers.n8n_webhook import _update_products_json
+
+        catalog = [
+            {
+                "id": "prod-lojista",
+                "name": "Combo Lojista",
+                "price": 45.0,
+                "category_id": FAKE_CATEGORY_LOJISTA_ID,
+                "category": "lojista-b2b",
+                "tenant_id": FAKE_TENANT_ID,
+                "is_active": True,
+            },
+            {**PRODUCT_DB_ROW, "name": "Geleia PF"},
+        ]
+        lead_snap = {
+            "id": FAKE_LEAD_ID,
+            "tenant_id": FAKE_TENANT_ID,
+            "products_json": [],
+            "stock_reserved_json": [],
+            "notes": "",
+        }
+        responses = deque(
+            [
+                _FakeExec(data=[{"person_type": "PJ"}]),
+                _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_LOJISTA_ROW]),
+                MagicMock(data=lead_snap),
+                _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
+            ]
+        )
+        sb = _make_supabase_for_update_products_json(responses)
+
+        payload = N8nWebhookPayload(
+            instance_token="t",
+            whatsapp_chat_id=FAKE_CHAT_ID,
+            intent="pedido",
+            order_summary=[
+                OrderItem(product="Combo Lojista", quantity=2, total="R$ 90,00"),
+            ],
+            total_value="R$ 90,00",
+        )
+        lead_row = {**LEAD_ROW, "stage": "B2C", "client_id": "client-pj-1"}
+        products_json, warnings = _update_products_json(
+            sb, lead_row=lead_row, payload=payload, tenant_id=FAKE_TENANT_ID,
+        )
+
+        self.assertEqual(len(products_json), 1)
+        self.assertEqual(products_json[0]["name"], "Combo Lojista")
+        self.assertEqual(mock_apply.call_args.kwargs["delta"], {"prod-lojista": 2})
+        self.assertEqual(warnings, [])
+
+    @patch("app.routers.n8n_webhook.apply_stock_delta")
+    def test_explicit_disallowed_product_id_is_forced_unmatched(self, mock_apply):
+        from app.routers.n8n_webhook import _update_products_json
+
+        catalog = [
+            {**PRODUCT_DB_ROW, "name": "Kit Degustação"},
+            {
+                "id": "prod-lojista-kit",
+                "name": "Kit Degustação",
+                "price": 99.0,
+                "category_id": FAKE_CATEGORY_LOJISTA_ID,
+                "category": "lojista-b2b",
+                "tenant_id": FAKE_TENANT_ID,
+                "is_active": True,
+            },
+        ]
+        lead_snap = {
+            "id": FAKE_LEAD_ID,
+            "tenant_id": FAKE_TENANT_ID,
+            "products_json": [],
+            "stock_reserved_json": [],
+            "notes": "",
+        }
+        captured: list[dict] = []
+        responses = deque(
+            [
+                _FakeExec(data=catalog),
+                _FakeExec(data=[CATEGORY_CLIENTE_FINAL_ROW]),
+                MagicMock(data=lead_snap),
+                _FakeExec(data=[{"id": FAKE_LEAD_ID, "tenant_id": FAKE_TENANT_ID}]),
+            ]
+        )
+        sb = _make_supabase_for_update_products_json(responses, capture_updates=captured)
+
+        payload = N8nWebhookPayload(
+            instance_token="t",
+            whatsapp_chat_id=FAKE_CHAT_ID,
+            intent="cart_update",
+            order_summary=[
+                OrderItem(
+                    product_id="prod-lojista-kit",
+                    product="Kit Degustação",
+                    quantity=1,
+                    total="R$ 99,00",
+                ),
+            ],
+            total_value="R$ 99,00",
+        )
+        lead_row = {**LEAD_ROW, "stage": "B2C", "client_id": None}
+        products_json, warnings = _update_products_json(
+            sb, lead_row=lead_row, payload=payload, tenant_id=FAKE_TENANT_ID,
+        )
+
+        self.assertEqual(products_json, [])
+        self.assertEqual(mock_apply.call_args.kwargs["delta"], {})
+        self.assertTrue(any("perfil PF" in warning for warning in warnings))
+        self.assertTrue(any("product_id 'prod-lojista-kit'" in warning for warning in warnings))
+        self.assertIn("Kit Degustação", captured[0]["notes"])
 
 
 class TestOrphanCatalogNotesHelpers(unittest.TestCase):
