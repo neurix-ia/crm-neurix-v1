@@ -364,6 +364,16 @@ class TestN8nPayloadValidation(unittest.TestCase):
         self.assertEqual(p.intent, "pedido")
         self.assertEqual(len(p.order_summary), 1)
 
+    def test_valid_pagto_confirmado_payload(self):
+        p = N8nWebhookPayload(
+            instance_token="abc",
+            whatsapp_chat_id="554195802989@s.whatsapp.net",
+            intent="pagto_confirmado",
+            order_id="order-uuid-1",
+        )
+        self.assertEqual(p.intent, "pagto_confirmado")
+        self.assertEqual(p.order_id, "order-uuid-1")
+
     def test_invalid_intent_rejected(self):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
@@ -760,6 +770,7 @@ class TestIntentStageMapping(unittest.TestCase):
         self.assertEqual(INTENT_TO_STAGE["perfil_b2b"], "B2B")
         self.assertEqual(INTENT_TO_STAGE["perfil_revenda"], "Quero Vender")
         self.assertEqual(INTENT_TO_STAGE["pedido"], "Pedido Feito")
+        self.assertEqual(INTENT_TO_STAGE["pagto_confirmado"], "Pagto Confirmado")
 
 
 class TestCommercialProfileResolution(unittest.TestCase):

@@ -80,6 +80,8 @@ class TestN8nAgentToolHelpers(unittest.TestCase):
         self.assertEqual(route_hint_from_stage("b2c"), "b2c")
         self.assertEqual(route_hint_from_stage("Quero Vender"), "revenda")
         self.assertEqual(route_hint_from_stage("Pedido Feito"), "pedido_feito")
+        self.assertEqual(route_hint_from_stage("Pagto Confirmado"), "pagto_confirmado")
+        self.assertEqual(route_hint_from_stage("PAGTO CONFIRMADO"), "pagto_confirmado")
         self.assertEqual(route_hint_from_stage("FINALIZADO"), "finalizado")
         self.assertEqual(route_hint_from_stage("Finalizado"), "finalizado")
         self.assertEqual(route_hint_from_stage("Novo"), "other")

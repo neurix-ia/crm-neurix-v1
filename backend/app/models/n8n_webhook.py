@@ -28,8 +28,16 @@ class N8nWebhookPayload(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     lead_name: Optional[str] = Field(None, max_length=200)
     lead_cnpj: Optional[str] = Field(None, max_length=20)
-    intent: Literal["perfil_b2c", "perfil_b2b", "perfil_revenda", "cart_update", "pedido"]
+    intent: Literal[
+        "perfil_b2c",
+        "perfil_b2b",
+        "perfil_revenda",
+        "cart_update",
+        "pedido",
+        "pagto_confirmado",
+    ]
     button_id: Optional[str] = None
+    order_id: Optional[str] = None
     order_summary: Optional[list[OrderItem]] = None
     payment_method: Optional[str] = None
     total_value: Optional[str] = None

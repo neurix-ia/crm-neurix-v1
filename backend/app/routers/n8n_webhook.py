@@ -1,6 +1,6 @@
 """
 N8n Unified Webhook Router — POST /api/n8n/webhook
-Routes by intent: perfil_b2c, perfil_b2b, perfil_revenda, cart_update, pedido.
+Routes by intent: perfil_b2c, perfil_b2b, perfil_revenda, cart_update, pedido, pagto_confirmado.
 Auth: API key via X-CRM-API-Key header (no JWT).
 """
 
@@ -44,6 +44,7 @@ INTENT_TO_STAGE = {
     "perfil_b2b": "B2B",
     "perfil_revenda": "Quero Vender",
     "pedido": "Pedido Feito",
+    "pagto_confirmado": "Pagto Confirmado",
 }
 
 PROFILE_ALLOWED_CATEGORY_SLUGS = {
@@ -115,6 +116,18 @@ def _format_lead_phone(phone_raw: str | None, whatsapp_chat_id: str) -> str | No
     return format_brazil_phone_display(p) or p
 
 
+def _insert_lead_row(supabase: SupabaseClient, payload: dict):
+    """Insert lead; retry sem `phone` se o schema ainda não tiver a coluna (staging antigo)."""
+    try:
+        return supabase.table("leads").insert(payload).execute()
+    except Exception as exc:
+        err = str(exc).lower()
+        if "phone" in payload and ("phone" in err or "pgrst204" in err):
+            slim = {k: v for k, v in payload.items() if k != "phone"}
+            return supabase.table("leads").insert(slim).execute()
+        raise
+
+
 def _create_lead_for_n8n(
     supabase: SupabaseClient,
     *,
@@ -154,15 +167,16 @@ def _create_lead_for_n8n(
         "whatsapp_chat_id": chat,
         "contact_name": display_name[:500],
         "company_name": display_name[:500],
-        "phone": formatted_phone,
         "stage": stage_slug,
         "value": 0,
     }
+    if formatted_phone:
+        new_lead["phone"] = formatted_phone
     if client_id:
         new_lead["client_id"] = client_id
 
     try:
-        ins = supabase.table("leads").insert(new_lead).execute()
+        ins = _insert_lead_row(supabase, new_lead)
         if ins.data:
             logger.info(
                 "n8n_lead_auto_created",
@@ -670,6 +684,72 @@ def _link_client_to_lead(
         logger.warning("n8n_client_link_failed", extra={"lead_id": lead_row["id"], "client_id": client_id})
 
 
+def _confirm_order_payment(
+    supabase: SupabaseClient,
+    *,
+    tenant_id: str,
+    lead_id: str,
+    order_id: str | None,
+) -> tuple[str | None, bool]:
+    """Marca pedido como pago. Retorna (order_id, já_estava_pago)."""
+    order_row: dict | None = None
+
+    if order_id:
+        try:
+            r = (
+                supabase.table("orders")
+                .select("id, lead_id, tenant_id, payment_status")
+                .eq("id", order_id)
+                .eq("tenant_id", tenant_id)
+                .limit(1)
+                .execute()
+            )
+            order_row = (r.data or [None])[0]
+            if order_row and str(order_row.get("lead_id") or "") not in ("", lead_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="order_id não pertence ao lead informado.",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("n8n_order_lookup_failed", extra={"order_id": order_id, "error": str(exc)})
+
+    if not order_row:
+        try:
+            r = (
+                supabase.table("orders")
+                .select("id, lead_id, tenant_id, payment_status")
+                .eq("lead_id", lead_id)
+                .eq("tenant_id", tenant_id)
+                .eq("payment_status", "pendente")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            order_row = (r.data or [None])[0]
+        except Exception as exc:
+            logger.warning("n8n_pending_order_lookup_failed", extra={"lead_id": lead_id, "error": str(exc)})
+
+    if not order_row:
+        return None, False
+
+    resolved_order_id = str(order_row["id"])
+    if str(order_row.get("payment_status") or "").lower() == "pago":
+        return resolved_order_id, True
+
+    try:
+        supabase.table("orders").update({"payment_status": "pago"}).eq("id", resolved_order_id).execute()
+    except Exception as exc:
+        logger.exception("n8n_order_payment_confirm_failed", extra={"order_id": resolved_order_id})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao confirmar pagamento do pedido: {exc}",
+        ) from exc
+
+    return resolved_order_id, False
+
+
 @router.post("/webhook", response_model=N8nWebhookResponse)
 async def n8n_webhook(
     payload: N8nWebhookPayload,
@@ -889,6 +969,49 @@ async def n8n_webhook(
             stage=canonical,
             order_id=order_id,
             message=f"Pedido {'atualizado' if existing_order else 'criado'}. Lead movido para '{canonical or 'N/A'}'.",
+            warnings=warnings,
+        )
+
+    # ── pagto_confirmado ──
+    if payload.intent == "pagto_confirmado":
+        order_id, already_paid = _confirm_order_payment(
+            supabase,
+            tenant_id=tenant_id,
+            lead_id=lead_id,
+            order_id=payload.order_id,
+        )
+        if not order_id:
+            warnings.append("Nenhum pedido pendente encontrado para este lead — apenas a etapa será atualizada.")
+
+        target_stage_name = INTENT_TO_STAGE["pagto_confirmado"]
+        stage_row = _resolve_stage_case_insensitive(
+            supabase, tenant_id=tenant_id, funnel_id=funnel_id, target_stage_name=target_stage_name,
+        )
+        canonical: str | None = None
+        if stage_row:
+            canonical = _move_lead_to_stage(
+                supabase,
+                lead_row=lead_row,
+                stage_row=stage_row,
+                funnel_id=funnel_id,
+                tenant_id=tenant_id,
+                intent=payload.intent,
+                button_id=payload.button_id,
+            )
+        else:
+            warnings.append(f"Etapa '{target_stage_name}' não encontrada no funil — lead não foi movido.")
+
+        paid_msg = "já estava pago" if already_paid else "marcado como pago"
+        return N8nWebhookResponse(
+            status="ok",
+            lead_id=lead_id,
+            client_id=str(lead_row.get("client_id") or "") or None,
+            stage=canonical,
+            order_id=order_id,
+            message=(
+                f"Pagamento confirmado. Pedido {paid_msg if order_id else 'não localizado'}. "
+                f"Lead movido para '{canonical or 'N/A'}'."
+            ),
             warnings=warnings,
         )
 

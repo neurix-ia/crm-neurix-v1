@@ -487,6 +487,8 @@ def route_hint_from_stage(stage_name: str | None) -> str:
         return "revenda"
     if s == "pedido feito":
         return "pedido_feito"
+    if s == "pagto confirmado":
+        return "pagto_confirmado"
     if s == "finalizado":
         return "finalizado"
     return "other"
