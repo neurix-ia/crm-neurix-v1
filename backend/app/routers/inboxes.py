@@ -205,7 +205,9 @@ async def create_inbox(
         "tenant_id": inbox_tenant,
         "funnel_id": body.funnel_id,
         "name": body.name.strip(),
+        "provider": body.provider,
         "uazapi_settings": body.uazapi_settings or {},
+        "chatwoot_settings": body.chatwoot_settings or {},
         "created_at": now,
         "updated_at": now,
     }
@@ -235,12 +237,18 @@ async def update_inbox(
     if body.funnel_id is not None:
         patch["funnel_id"] = body.funnel_id
         patch["tenant_id"] = str(funnel_row["tenant_id"])
+    if body.provider is not None:
+        patch["provider"] = body.provider
     if body.uazapi_settings is not None:
         merged = dict(existing.get("uazapi_settings") or {})
         merged.update(body.uazapi_settings)
         patch["uazapi_settings"] = merged
+    if body.chatwoot_settings is not None:
+        merged_cw = dict(existing.get("chatwoot_settings") or {})
+        merged_cw.update(body.chatwoot_settings)
+        patch["chatwoot_settings"] = merged_cw
 
-    if len(patch) <= 1 and body.uazapi_settings is None:
+    if len(patch) <= 1 and body.uazapi_settings is None and body.chatwoot_settings is None:
         return _row_to_response(existing)
 
     res = supabase.table("inboxes").update(patch).eq("id", inbox_id).execute()
