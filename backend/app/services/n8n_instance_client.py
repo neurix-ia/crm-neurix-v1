@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -122,12 +123,11 @@ class N8nInstanceClient:
         *,
         take: int = 100,
         skip: int = 0,
+        select_fields: Optional[list[str]] = None,
     ) -> dict[str, Any]:
-        params: dict[str, str] = {
-            "take": str(take),
-            "skip": str(skip),
-            "select": '["id","name","path","parentFolderId"]',
-        }
+        params: dict[str, str] = {"take": str(take), "skip": str(skip)}
+        if select_fields:
+            params["select"] = json.dumps(select_fields)
         return await self._get_json(f"/api/v1/projects/{project_id}/folders", params=params)
 
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:

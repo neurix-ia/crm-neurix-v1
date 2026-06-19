@@ -113,10 +113,20 @@ export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | 
     }
 
     if (tree.folders.length === 0) {
+        const errors = (tree.instances ?? []).filter((i) => i.status === "error" && i.error_message);
         return (
-            <p className="text-sm text-text-secondary-light">
-                Nenhuma pasta encontrada — verifique scopes workflow:list, folder:list e project:list nas API keys.
-            </p>
+            <div className="text-sm space-y-2">
+                <p className="text-text-secondary-light">
+                    Nenhuma pasta encontrada.
+                    {errors.length === 0 &&
+                        " Verifique scopes workflow:list, folder:list e project:list nas API keys."}
+                </p>
+                {errors.map((inst) => (
+                    <p key={inst.instance_id} className="text-red-600 dark:text-red-400 text-xs">
+                        <strong>{inst.instance_label}:</strong> {inst.error_message}
+                    </p>
+                ))}
+            </div>
         );
     }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -14,6 +15,7 @@ import redis.asyncio as aioredis
 from app.config import Settings
 from app.models.hq import (
     HqPeriod,
+    N8nAgentsTreeInstanceStatus,
     N8nAgentWorkflowItem,
     N8nAgentsTreeResponse,
     N8nClientFolderNode,
@@ -361,11 +363,15 @@ async def _enrich_rows_metadata(
     return list(await asyncio.gather(*[enrich_one(row) for row in rows]))
 
 
-async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]:
+async def _paginate_workflows(
+    client: N8nInstanceClient,
+    *,
+    include_folders: bool,
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     cursor: Optional[str] = None
     while True:
-        payload = await client.list_workflows(limit=250, cursor=cursor, include_folders=True)
+        payload = await client.list_workflows(limit=250, cursor=cursor, include_folders=include_folders)
         chunk = payload.get("data") or []
         if isinstance(chunk, list):
             for row in chunk:
@@ -373,11 +379,60 @@ async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]
                     continue
                 if row.get("resource") == "folder":
                     continue
-                items.append(row)
+                if row.get("id"):
+                    items.append(row)
         cursor = payload.get("nextCursor")
         if not cursor:
             break
     return items
+
+
+async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]:
+    try:
+        return await _paginate_workflows(client, include_folders=True)
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response is not None else 0
+        if code in (400, 404, 422):
+            logger.info(
+                "list_workflows includeFolders rejeitado (HTTP %s) em %s — retry sem flag",
+                code,
+                client.config.id,
+            )
+            return await _paginate_workflows(client, include_folders=False)
+        raise
+
+
+async def _fetch_folders_for_project(
+    client: N8nInstanceClient,
+    project_id: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    skip = 0
+    select_fields = ["id", "name", "path", "parentFolderId"]
+    use_select = True
+    while True:
+        try:
+            if use_select:
+                folders_payload = await client.list_folders(
+                    project_id, take=100, skip=skip, select_fields=select_fields
+                )
+            else:
+                folders_payload = await client.list_folders(project_id, take=100, skip=skip)
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
+            if use_select and code in (400, 422):
+                logger.info("list_folders select rejeitado project=%s — retry sem select", project_id)
+                use_select = False
+                continue
+            raise
+        chunk = folders_payload.get("data") or []
+        if not isinstance(chunk, list) or not chunk:
+            break
+        rows.extend([f for f in chunk if isinstance(f, dict)])
+        if len(chunk) < 100:
+            break
+        skip += 100
+    return rows
 
 
 async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
@@ -399,16 +454,13 @@ async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
         skip = 0
         while True:
             try:
-                folders_payload = await client.list_folders(str(project_id), take=100, skip=skip)
+                folder_rows = await _fetch_folders_for_project(client, str(project_id))
             except Exception as exc:
                 logger.debug("list_folders falhou project=%s: %s", project_id, exc)
                 break
-            rows = folders_payload.get("data") or []
-            if not isinstance(rows, list) or not rows:
+            if not folder_rows:
                 break
-            for folder in rows:
-                if not isinstance(folder, dict):
-                    continue
+            for folder in folder_rows:
                 fid = folder.get("id")
                 fname = folder.get("name")
                 if fid and fname:
@@ -416,9 +468,7 @@ async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
                 path = folder.get("path")
                 if fid and isinstance(path, list) and path:
                     names[f"{project_id}:{fid}:path"] = " / ".join(str(p) for p in path if p)
-            if len(rows) < 100:
-                break
-            skip += 100
+            break
     return names
 
 
@@ -446,15 +496,30 @@ async def _resolve_folder_for_workflow(
     return None, "Sem pasta"
 
 
+@dataclass
+class _InstanceTreeResult:
+    folders: list[N8nClientFolderNode]
+    workflow_count: int = 0
+    error: Optional[str] = None
+
+
 async def _fetch_agents_tree_for_instance(
     config: N8nInstanceConfig,
     *,
     verify_ssl: bool = True,
-) -> list[N8nClientFolderNode]:
+) -> _InstanceTreeResult:
     client = N8nInstanceClient(config, verify_ssl=verify_ssl)
-    summaries = await _list_all_workflows(client)
+    try:
+        summaries = await _list_all_workflows(client)
+    except Exception as exc:
+        logger.warning("agents tree list workflows falhou instance=%s: %s", config.id, exc)
+        return _InstanceTreeResult([], error=str(exc)[:300])
+
     if not summaries:
-        return []
+        return _InstanceTreeResult(
+            [],
+            error="Nenhum workflow retornado — verifique scope workflow:list na API key.",
+        )
 
     folder_map = await _load_folder_name_map(client)
     folder_cache = dict(folder_map)
@@ -513,7 +578,7 @@ async def _fetch_agents_tree_for_instance(
     folders.sort(key=lambda f: (-f.active_agents, f.folder_name.lower()))
     for folder in folders:
         folder.workflows.sort(key=lambda w: (not w.is_agent, not w.active, w.workflow_name.lower()))
-    return folders
+    return _InstanceTreeResult(folders=folders, workflow_count=len(summaries))
 
 
 async def _attach_last_failure(
@@ -771,7 +836,7 @@ class HqN8nService:
         return result
 
     async def get_agents_tree(self, *, force_refresh: bool = False) -> N8nAgentsTreeResponse:
-        cache_key = "hq:n8n:agents_tree"
+        cache_key = "hq:n8n:agents_tree:v2"
         if not force_refresh:
             cached = await hq_cache_get(self.redis, cache_key, N8nAgentsTreeResponse)
             if cached:
@@ -792,11 +857,29 @@ class HqN8nService:
         )
 
         folders: list[N8nClientFolderNode] = []
+        instance_statuses: list[N8nAgentsTreeInstanceStatus] = []
         for cfg, chunk in zip(self.instances, per_instance):
             if isinstance(chunk, Exception):
                 logger.warning("agents tree falhou instance=%s: %s", cfg.id, chunk)
+                instance_statuses.append(
+                    N8nAgentsTreeInstanceStatus(
+                        instance_id=cfg.id,
+                        instance_label=cfg.label,
+                        status="error",
+                        error_message=str(chunk)[:300],
+                    )
+                )
                 continue
-            folders.extend(chunk)
+            folders.extend(chunk.folders)
+            instance_statuses.append(
+                N8nAgentsTreeInstanceStatus(
+                    instance_id=cfg.id,
+                    instance_label=cfg.label,
+                    status="ok" if chunk.folders else "error",
+                    error_message=chunk.error,
+                    workflow_count=chunk.workflow_count,
+                )
+            )
 
         folders.sort(
             key=lambda f: (
@@ -815,6 +898,7 @@ class HqN8nService:
             total_folders=len(folders),
             available_tags=sorted(tag_set, key=str.lower),
             folders=folders,
+            instances=instance_statuses,
             generated_at=now,
         )
         await hq_cache_set(self.redis, cache_key, result, self.cache_ttl)
