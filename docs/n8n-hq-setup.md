@@ -49,6 +49,7 @@ Scopes obrigatórios:
 - `execution:read` + `execution:list` — ranking de falhas + modal de erro (Fase B)
 - `workflow:read` + `workflow:list` — árvore de agentes (Fase C)
 - `folder:read` + `folder:list` — pasta = cliente na árvore
+- `project:list` — listar projetos para mapear pastas
 
 Requisitos do plano n8n:
 

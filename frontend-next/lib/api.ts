@@ -481,6 +481,7 @@ export type N8nAgentWorkflowItem = {
     active: boolean;
     is_agent: boolean;
     is_archived: boolean;
+    tags: string[];
     n8n_url?: string | null;
 };
 
@@ -497,6 +498,7 @@ export type N8nClientFolderNode = {
 export type N8nAgentsTreeResponse = {
     total_active_agents: number;
     total_folders: number;
+    available_tags: string[];
     folders: N8nClientFolderNode[];
     cached: boolean;
     generated_at: string;

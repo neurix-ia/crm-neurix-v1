@@ -215,6 +215,15 @@ def _unwrap_workflow(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _workflow_project_id(workflow: dict[str, Any]) -> Optional[str]:
+    owner = workflow.get("owner")
+    if isinstance(owner, dict) and owner.get("projectId"):
+        return str(owner["projectId"])
+    home = workflow.get("homeProject")
+    if isinstance(home, dict) and home.get("id"):
+        return str(home["id"])
+    project = workflow.get("project")
+    if isinstance(project, dict) and project.get("id"):
+        return str(project["id"])
     shared = workflow.get("shared")
     if isinstance(shared, list):
         for item in shared:
@@ -222,13 +231,64 @@ def _workflow_project_id(workflow: dict[str, Any]) -> Optional[str]:
                 continue
             if item.get("projectId"):
                 return str(item["projectId"])
-            project = item.get("project")
-            if isinstance(project, dict) and project.get("id"):
-                return str(project["id"])
-    home = workflow.get("homeProject")
-    if isinstance(home, dict) and home.get("id"):
-        return str(home["id"])
+            nested = item.get("project")
+            if isinstance(nested, dict) and nested.get("id"):
+                return str(nested["id"])
     return None
+
+
+def _normalize_workflow_tags(workflow: dict[str, Any]) -> list[str]:
+    raw = workflow.get("tags")
+    if not isinstance(raw, list):
+        return []
+    tags: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            tags.append(item.strip())
+        elif isinstance(item, dict):
+            name = item.get("name")
+            if name:
+                tags.append(str(name))
+    return tags
+
+
+def _merge_workflow_summary(detail: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(detail)
+    for key in ("parentFolder", "parentFolderId", "folderPath", "homeProject", "owner", "project", "tags"):
+        if merged.get(key) in (None, [], {}) and summary.get(key) not in (None, [], {}):
+            merged[key] = summary[key]
+    return merged
+
+
+def _folder_name_for_workflow(
+    workflow: dict[str, Any],
+    folder_map: dict[str, str],
+) -> tuple[Optional[str], str]:
+    parent_folder = workflow.get("parentFolder")
+    if isinstance(parent_folder, dict):
+        folder_id = parent_folder.get("id")
+        folder_name = parent_folder.get("name")
+        if folder_name:
+            return (str(folder_id) if folder_id else None), str(folder_name)
+
+    folder_path = workflow.get("folderPath")
+    if isinstance(folder_path, list) and folder_path:
+        parts = [str(p) for p in folder_path if p]
+        if parts:
+            leaf_id = None
+            parent_folder_id = workflow.get("parentFolderId")
+            if parent_folder_id:
+                leaf_id = str(parent_folder_id)
+            return leaf_id, " / ".join(parts)
+
+    parent_folder_id = workflow.get("parentFolderId")
+    project_id = _workflow_project_id(workflow)
+    if parent_folder_id and project_id:
+        key = f"{project_id}:{parent_folder_id}"
+        if key in folder_map:
+            return str(parent_folder_id), folder_map[key]
+
+    return None, "Sem pasta"
 
 
 async def _folder_label_for_workflow(
@@ -236,11 +296,9 @@ async def _folder_label_for_workflow(
     workflow: dict[str, Any],
     folder_cache: dict[str, str],
 ) -> Optional[str]:
-    folder_path = workflow.get("folderPath")
-    if isinstance(folder_path, list) and folder_path:
-        parts = [str(p) for p in folder_path if p]
-        if parts:
-            return " / ".join(parts)
+    _, label = _folder_name_for_workflow(workflow, folder_cache)
+    if label != "Sem pasta":
+        return label
 
     parent_folder_id = workflow.get("parentFolderId")
     if not parent_folder_id:
@@ -307,10 +365,15 @@ async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]
     items: list[dict[str, Any]] = []
     cursor: Optional[str] = None
     while True:
-        payload = await client.list_workflows(limit=250, cursor=cursor)
+        payload = await client.list_workflows(limit=250, cursor=cursor, include_folders=True)
         chunk = payload.get("data") or []
         if isinstance(chunk, list):
-            items.extend([w for w in chunk if isinstance(w, dict)])
+            for row in chunk:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("resource") == "folder":
+                    continue
+                items.append(row)
         cursor = payload.get("nextCursor")
         if not cursor:
             break
@@ -350,28 +413,35 @@ async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
                 fname = folder.get("name")
                 if fid and fname:
                     names[f"{project_id}:{fid}"] = str(fname)
+                path = folder.get("path")
+                if fid and isinstance(path, list) and path:
+                    names[f"{project_id}:{fid}:path"] = " / ".join(str(p) for p in path if p)
             if len(rows) < 100:
                 break
             skip += 100
     return names
 
 
-def _folder_name_for_workflow(
+async def _resolve_folder_for_workflow(
+    client: N8nInstanceClient,
     workflow: dict[str, Any],
     folder_map: dict[str, str],
 ) -> tuple[Optional[str], str]:
-    folder_path = workflow.get("folderPath")
-    if isinstance(folder_path, list) and folder_path:
-        parts = [str(p) for p in folder_path if p]
-        if parts:
-            return None, " / ".join(parts)
+    folder_id, folder_name = _folder_name_for_workflow(workflow, folder_map)
+    if folder_name != "Sem pasta":
+        return folder_id, folder_name
 
-    parent_folder_id = workflow.get("parentFolderId")
+    label = await _folder_label_for_workflow(client, workflow, folder_map)
+    if label:
+        parent_folder_id = workflow.get("parentFolderId")
+        return (str(parent_folder_id) if parent_folder_id else None), label
+
     project_id = _workflow_project_id(workflow)
-    if parent_folder_id and project_id:
-        key = f"{project_id}:{parent_folder_id}"
-        if key in folder_map:
-            return str(parent_folder_id), folder_map[key]
+    parent_folder_id = workflow.get("parentFolderId")
+    if project_id and parent_folder_id:
+        path_key = f"{project_id}:{parent_folder_id}:path"
+        if path_key in folder_map:
+            return str(parent_folder_id), folder_map[path_key]
 
     return None, "Sem pasta"
 
@@ -387,6 +457,7 @@ async def _fetch_agents_tree_for_instance(
         return []
 
     folder_map = await _load_folder_name_map(client)
+    folder_cache = dict(folder_map)
     sem = asyncio.Semaphore(8)
 
     async def load_detail(summary: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -395,10 +466,11 @@ async def _fetch_agents_tree_for_instance(
             return None
         async with sem:
             try:
-                return _unwrap_workflow(await client.get_workflow(str(wid)))
+                detail = _unwrap_workflow(await client.get_workflow(str(wid)))
+                return _merge_workflow_summary(detail, summary)
             except Exception as exc:
                 logger.debug("get_workflow falhou id=%s: %s", wid, exc)
-                return None
+                return summary
 
     details = await asyncio.gather(*[load_detail(s) for s in summaries])
     grouped: dict[str, N8nClientFolderNode] = {}
@@ -409,7 +481,7 @@ async def _fetch_agents_tree_for_instance(
         if wf.get("isArchived"):
             continue
 
-        folder_id, folder_name = _folder_name_for_workflow(wf, folder_map)
+        folder_id, folder_name = await _resolve_folder_for_workflow(client, wf, folder_cache)
         group_key = f"{folder_id or 'root'}:{folder_name}"
         if group_key not in grouped:
             grouped[group_key] = N8nClientFolderNode(
@@ -428,6 +500,7 @@ async def _fetch_agents_tree_for_instance(
             active=active,
             is_agent=agent,
             is_archived=bool(wf.get("isArchived")),
+            tags=_normalize_workflow_tags(wf),
             n8n_url=f"{config.base_url.rstrip('/')}/workflow/{wid}" if wid else None,
         )
         node = grouped[group_key]
@@ -733,9 +806,14 @@ class HqN8nService:
             )
         )
         total_agents = sum(f.active_agents for f in folders)
+        tag_set: set[str] = set()
+        for folder in folders:
+            for wf in folder.workflows:
+                tag_set.update(wf.tags)
         result = N8nAgentsTreeResponse(
             total_active_agents=total_agents,
             total_folders=len(folders),
+            available_tags=sorted(tag_set, key=str.lower),
             folders=folders,
             generated_at=now,
         )

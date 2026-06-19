@@ -1,8 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { N8nAgentsTreeResponse, N8nClientFolderNode } from "@/lib/api";
+
+type StatusFilter = "all" | "active" | "inactive";
+
+function matchesStatus(active: boolean, filter: StatusFilter) {
+    if (filter === "active") return active;
+    if (filter === "inactive") return !active;
+    return true;
+}
+
+function filterFolder(folder: N8nClientFolderNode, status: StatusFilter, tag: string): N8nClientFolderNode | null {
+    const workflows = folder.workflows.filter((wf) => {
+        if (!matchesStatus(wf.active, status)) return false;
+        if (tag !== "all" && !wf.tags.includes(tag)) return false;
+        return true;
+    });
+    if (workflows.length === 0) return null;
+
+    const active_agents = workflows.filter((w) => w.is_agent && w.active).length;
+    return { ...folder, workflows, total_workflows: workflows.length, active_agents };
+}
 
 function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
     const [open, setOpen] = useState(false);
@@ -37,7 +57,7 @@ function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
             {open && (
                 <ul className="pb-2 pl-11 pr-4 space-y-1">
                     {folder.workflows.map((wf) => (
-                        <li key={wf.workflow_id} className="flex items-center gap-2 text-sm py-1">
+                        <li key={wf.workflow_id} className="flex items-center gap-2 text-sm py-1 min-w-0">
                             <span
                                 className={`w-2 h-2 rounded-full shrink-0 ${
                                     wf.active ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"
@@ -62,6 +82,11 @@ function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
                             ) : (
                                 <span className="truncate">{wf.workflow_name}</span>
                             )}
+                            {wf.tags.length > 0 && (
+                                <span className="text-[10px] text-text-secondary-light truncate hidden sm:inline">
+                                    {wf.tags.join(", ")}
+                                </span>
+                            )}
                         </li>
                     ))}
                 </ul>
@@ -71,6 +96,18 @@ function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
 }
 
 export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | null }) {
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+    const [tagFilter, setTagFilter] = useState("all");
+
+    const filtered = useMemo(() => {
+        if (!tree) return null;
+        const folders = tree.folders
+            .map((f) => filterFolder(f, statusFilter, tagFilter))
+            .filter((f): f is N8nClientFolderNode => f !== null);
+        const activeAgents = folders.reduce((n, f) => n + f.active_agents, 0);
+        return { folders, activeAgents };
+    }, [tree, statusFilter, tagFilter]);
+
     if (!tree) {
         return <p className="text-sm text-text-secondary-light">Carregando árvore…</p>;
     }
@@ -78,33 +115,66 @@ export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | 
     if (tree.folders.length === 0) {
         return (
             <p className="text-sm text-text-secondary-light">
-                Nenhuma pasta encontrada — verifique scopes workflow:list e folder:list nas API keys.
+                Nenhuma pasta encontrada — verifique scopes workflow:list, folder:list e project:list nas API keys.
             </p>
         );
     }
 
+    const tags = tree.available_tags ?? [];
+
     return (
         <div>
-            <div className="flex items-center gap-4 mb-4 text-sm">
-                <span>
-                    <strong className="text-lg font-display">{tree.total_active_agents}</strong>{" "}
-                    <span className="text-text-secondary-light">agentes ativos</span>
-                </span>
-                <span className="text-text-secondary-light">
-                    · {tree.total_folders} pasta{tree.total_folders !== 1 ? "s" : ""}
-                </span>
-                {tree.cached && (
-                    <span className="text-xs text-text-secondary-light">· cache</span>
-                )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+                <div className="flex items-center gap-4 text-sm flex-1">
+                    <span>
+                        <strong className="text-lg font-display">{filtered?.activeAgents ?? tree.total_active_agents}</strong>{" "}
+                        <span className="text-text-secondary-light">agentes ativos</span>
+                    </span>
+                    <span className="text-text-secondary-light">
+                        · {filtered?.folders.length ?? tree.total_folders} pasta
+                        {(filtered?.folders.length ?? tree.total_folders) !== 1 ? "s" : ""}
+                    </span>
+                    {tree.cached && <span className="text-xs text-text-secondary-light">· cache</span>}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                        className="text-sm rounded-xl border border-border-light dark:border-border-dark bg-transparent px-3 py-1.5"
+                        aria-label="Filtrar por status"
+                    >
+                        <option value="all">Todos os status</option>
+                        <option value="active">Somente ativos</option>
+                        <option value="inactive">Somente inativos</option>
+                    </select>
+                    <select
+                        value={tagFilter}
+                        onChange={(e) => setTagFilter(e.target.value)}
+                        className="text-sm rounded-xl border border-border-light dark:border-border-dark bg-transparent px-3 py-1.5 max-w-[200px]"
+                        aria-label="Filtrar por tag"
+                    >
+                        <option value="all">Todas as tags</option>
+                        {tags.map((tag) => (
+                            <option key={tag} value={tag}>
+                                {tag}
+                            </option>
+                        ))}
+                    </select>
+                </div>
             </div>
-            <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark overflow-hidden">
-                {tree.folders.map((folder) => (
-                    <FolderRow
-                        key={`${folder.instance_id}-${folder.folder_id ?? folder.folder_name}`}
-                        folder={folder}
-                    />
-                ))}
-            </div>
+
+            {filtered && filtered.folders.length === 0 ? (
+                <p className="text-sm text-text-secondary-light">Nenhum workflow corresponde aos filtros.</p>
+            ) : (
+                <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark overflow-hidden">
+                    {(filtered?.folders ?? tree.folders).map((folder) => (
+                        <FolderRow
+                            key={`${folder.instance_id}-${folder.folder_id ?? folder.folder_name}`}
+                            folder={folder}
+                        />
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

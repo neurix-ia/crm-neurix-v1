@@ -106,6 +106,7 @@ class N8nAgentWorkflowItem(BaseModel):
     active: bool
     is_agent: bool
     is_archived: bool = False
+    tags: list[str] = Field(default_factory=list)
     n8n_url: Optional[str] = None
 
 
@@ -122,6 +123,7 @@ class N8nClientFolderNode(BaseModel):
 class N8nAgentsTreeResponse(BaseModel):
     total_active_agents: int = 0
     total_folders: int = 0
+    available_tags: list[str] = Field(default_factory=list)
     folders: list[N8nClientFolderNode] = Field(default_factory=list)
     cached: bool = False
     generated_at: datetime

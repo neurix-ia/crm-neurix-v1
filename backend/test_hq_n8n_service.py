@@ -32,6 +32,20 @@ class TestHqN8nAggregation(unittest.TestCase):
         wf = {"shared": [{"projectId": "proj-1"}]}
         self.assertEqual(_workflow_project_id(wf), "proj-1")
 
+    def test_folder_name_from_parent_folder_object(self):
+        from app.services.hq_n8n_service import _folder_name_for_workflow
+
+        wf = {"parentFolder": {"id": "f1", "name": "Villa Dora"}}
+        fid, name = _folder_name_for_workflow(wf, {})
+        self.assertEqual(fid, "f1")
+        self.assertEqual(name, "Villa Dora")
+
+    def test_normalize_workflow_tags(self):
+        from app.services.hq_n8n_service import _normalize_workflow_tags
+
+        wf = {"tags": [{"name": "prod"}, {"name": "staging"}]}
+        self.assertEqual(_normalize_workflow_tags(wf), ["prod", "staging"])
+
     def test_metric_value_nested(self):
         payload = {"total": {"value": 100, "unit": "count", "deviation": 10}}
         self.assertEqual(_metric_value(payload, "total"), 100.0)

@@ -95,6 +95,7 @@ class N8nInstanceClient:
         limit: int = 250,
         cursor: Optional[str] = None,
         exclude_pinned_data: bool = True,
+        include_folders: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, str] = {"limit": str(min(limit, 250))}
         if active is not None:
@@ -105,6 +106,8 @@ class N8nInstanceClient:
             params["cursor"] = cursor
         if exclude_pinned_data:
             params["excludePinnedData"] = "true"
+        if include_folders:
+            params["includeFolders"] = "true"
         return await self._get_json("/api/v1/workflows", params=params)
 
     async def list_projects(self, *, limit: int = 100, cursor: Optional[str] = None) -> dict[str, Any]:
@@ -120,7 +123,11 @@ class N8nInstanceClient:
         take: int = 100,
         skip: int = 0,
     ) -> dict[str, Any]:
-        params: dict[str, str] = {"take": str(take), "skip": str(skip)}
+        params: dict[str, str] = {
+            "take": str(take),
+            "skip": str(skip),
+            "select": '["id","name","path","parentFolderId"]',
+        }
         return await self._get_json(f"/api/v1/projects/{project_id}/folders", params=params)
 
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
