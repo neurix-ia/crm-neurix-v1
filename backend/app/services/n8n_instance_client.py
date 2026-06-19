@@ -87,6 +87,42 @@ class N8nInstanceClient:
     async def get_folder(self, project_id: str, folder_id: str) -> dict[str, Any]:
         return await self._get_json(f"/api/v1/projects/{project_id}/folders/{folder_id}")
 
+    async def list_workflows(
+        self,
+        *,
+        active: Optional[bool] = None,
+        project_id: Optional[str] = None,
+        limit: int = 250,
+        cursor: Optional[str] = None,
+        exclude_pinned_data: bool = True,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(min(limit, 250))}
+        if active is not None:
+            params["active"] = "true" if active else "false"
+        if project_id:
+            params["projectId"] = project_id
+        if cursor:
+            params["cursor"] = cursor
+        if exclude_pinned_data:
+            params["excludePinnedData"] = "true"
+        return await self._get_json("/api/v1/workflows", params=params)
+
+    async def list_projects(self, *, limit: int = 100, cursor: Optional[str] = None) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(min(limit, 250))}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._get_json("/api/v1/projects", params=params)
+
+    async def list_folders(
+        self,
+        project_id: str,
+        *,
+        take: int = 100,
+        skip: int = 0,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"take": str(take), "skip": str(skip)}
+        return await self._get_json(f"/api/v1/projects/{project_id}/folders", params=params)
+
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
         url = f"{self._base}{path}"
         async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT, verify=self._verify_ssl) as client:

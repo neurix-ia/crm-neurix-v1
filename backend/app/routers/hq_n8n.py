@@ -11,7 +11,7 @@ import redis.asyncio as aioredis
 from app.authz import EffectiveRole, require_superadmin
 from app.config import Settings, get_settings
 from app.dependencies import get_redis_optional
-from app.models.hq import HqPeriod, N8nExecutionErrorDetail, N8nOverviewResponse, N8nWorkflowErrorsResponse
+from app.models.hq import HqPeriod, N8nAgentsTreeResponse, N8nExecutionErrorDetail, N8nOverviewResponse, N8nWorkflowErrorsResponse
 from app.services.hq_n8n_service import HqN8nService
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,29 @@ async def n8n_workflow_errors(
         raise
     except Exception as exc:
         logger.exception("hq n8n workflow errors falhou")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"HQ n8n indisponível: {type(exc).__name__}",
+        ) from exc
+
+
+@router.get(
+    "/agents/tree",
+    response_model=N8nAgentsTreeResponse,
+    summary="Árvore de agentes por pasta (cliente)",
+)
+async def n8n_agents_tree(
+    refresh: bool = Query(False),
+    _sa: EffectiveRole = Depends(require_superadmin),
+    settings: Settings = Depends(get_settings),
+    redis: aioredis.Redis | None = Depends(get_redis_optional),
+):
+    try:
+        return await _service(settings, redis).get_agents_tree(force_refresh=refresh)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("hq n8n agents tree falhou")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"HQ n8n indisponível: {type(exc).__name__}",

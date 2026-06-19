@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+    getHqN8nAgentsTree,
     getHqN8nOverview,
     getHqN8nWorkflowErrors,
     getHqSummary,
     refreshHqN8nCache,
     type HqLevel,
     type HqPeriod,
+    type N8nAgentsTreeResponse,
     type N8nOverviewResponse,
     type N8nWorkflowErrorRow,
     type N8nWorkflowErrorsResponse,
     type HqSummaryResponse,
 } from "@/lib/api";
+import N8nAgentsTree from "@/components/admin/N8nAgentsTree";
 import N8nExecutionErrorModal from "@/components/admin/N8nExecutionErrorModal";
 
 const PERIODS: { value: HqPeriod; label: string }[] = [
@@ -96,6 +99,7 @@ export default function NeurixHqPage() {
     const [summary, setSummary] = useState<HqSummaryResponse | null>(null);
     const [overview, setOverview] = useState<N8nOverviewResponse | null>(null);
     const [errors, setErrors] = useState<N8nWorkflowErrorsResponse | null>(null);
+    const [agentsTree, setAgentsTree] = useState<N8nAgentsTreeResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [err, setErr] = useState<string | null>(null);
@@ -109,14 +113,16 @@ export default function NeurixHqPage() {
             if (forceRefresh) setRefreshing(true);
             else setLoading(true);
             try {
-                const [s, o, e] = await Promise.all([
+                const [s, o, e, tree] = await Promise.all([
                     getHqSummary(period, token),
                     getHqN8nOverview(period, forceRefresh, token),
                     getHqN8nWorkflowErrors(period, 20, forceRefresh, token),
+                    getHqN8nAgentsTree(forceRefresh, token),
                 ]);
                 setSummary(s);
                 setOverview(o);
                 setErrors(e);
+                setAgentsTree(tree);
             } catch (e) {
                 setErr(e instanceof Error ? e.message : "Erro ao carregar Neurix HQ.");
             } finally {
@@ -301,6 +307,22 @@ export default function NeurixHqPage() {
                         )}
                     </>
                 ) : null}
+            </section>
+
+            {/* Agentes por cliente */}
+            <section>
+                <h2 className="text-lg font-bold font-display mb-1">Agentes por cliente</h2>
+                <p className="text-xs text-text-secondary-light mb-4">
+                    Pastas n8n = clientes · expanda para ver workflows
+                    {agentsTree?.generated_at && (
+                        <> · {new Date(agentsTree.generated_at).toLocaleString("pt-BR")}</>
+                    )}
+                </p>
+                {loading && !agentsTree ? (
+                    <p className="text-sm text-text-secondary-light">Carregando árvore…</p>
+                ) : (
+                    <N8nAgentsTree tree={agentsTree} />
+                )}
             </section>
 
             {/* Ranking erros */}

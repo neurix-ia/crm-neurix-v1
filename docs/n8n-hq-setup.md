@@ -47,7 +47,8 @@ Scopes obrigatórios:
 
 - `insights:read` — KPIs (summary)
 - `execution:read` + `execution:list` — ranking de falhas + modal de erro (Fase B)
-- `workflow:read` — futuro: árvore de agentes (Fase C)
+- `workflow:read` + `workflow:list` — árvore de agentes (Fase C)
+- `folder:read` + `folder:list` — pasta = cliente na árvore
 
 Requisitos do plano n8n:
 
@@ -93,4 +94,5 @@ curl -s -H "Authorization: Bearer TOKEN" "https://crm-staging.wbtech.dev/api/adm
 - `GET /api/admin/hq/summary?period=7d`
 - `GET /api/admin/hq/n8n/overview?period=7d`
 - `GET /api/admin/hq/n8n/workflows/errors?period=7d&limit=20`
+- `GET /api/admin/hq/n8n/agents/tree` — árvore de agentes por pasta
 - `POST /api/admin/hq/n8n/refresh` — invalida cache

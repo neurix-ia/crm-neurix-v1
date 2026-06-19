@@ -14,6 +14,9 @@ import redis.asyncio as aioredis
 from app.config import Settings
 from app.models.hq import (
     HqPeriod,
+    N8nAgentWorkflowItem,
+    N8nAgentsTreeResponse,
+    N8nClientFolderNode,
     N8nExecutionErrorDetail,
     N8nInstanceMetrics,
     N8nOverviewResponse,
@@ -21,6 +24,7 @@ from app.models.hq import (
     N8nWorkflowErrorsResponse,
 )
 from app.services.hq_cache import hq_cache_get, hq_cache_set
+from app.services.n8n_agent_detector import is_agent_workflow
 from app.services.n8n_execution_parser import extract_execution_error
 from app.services.n8n_instance_client import N8nInstanceClient, N8nInstanceConfig
 
@@ -299,6 +303,146 @@ async def _enrich_rows_metadata(
     return list(await asyncio.gather(*[enrich_one(row) for row in rows]))
 
 
+async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    cursor: Optional[str] = None
+    while True:
+        payload = await client.list_workflows(limit=250, cursor=cursor)
+        chunk = payload.get("data") or []
+        if isinstance(chunk, list):
+            items.extend([w for w in chunk if isinstance(w, dict)])
+        cursor = payload.get("nextCursor")
+        if not cursor:
+            break
+    return items
+
+
+async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
+    """Mapa projectId:folderId -> nome da pasta."""
+    names: dict[str, str] = {}
+    try:
+        projects_payload = await client.list_projects(limit=100)
+        projects = projects_payload.get("data") or []
+    except Exception as exc:
+        logger.warning("list_projects falhou: %s", exc)
+        return names
+
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        project_id = project.get("id")
+        if not project_id:
+            continue
+        skip = 0
+        while True:
+            try:
+                folders_payload = await client.list_folders(str(project_id), take=100, skip=skip)
+            except Exception as exc:
+                logger.debug("list_folders falhou project=%s: %s", project_id, exc)
+                break
+            rows = folders_payload.get("data") or []
+            if not isinstance(rows, list) or not rows:
+                break
+            for folder in rows:
+                if not isinstance(folder, dict):
+                    continue
+                fid = folder.get("id")
+                fname = folder.get("name")
+                if fid and fname:
+                    names[f"{project_id}:{fid}"] = str(fname)
+            if len(rows) < 100:
+                break
+            skip += 100
+    return names
+
+
+def _folder_name_for_workflow(
+    workflow: dict[str, Any],
+    folder_map: dict[str, str],
+) -> tuple[Optional[str], str]:
+    folder_path = workflow.get("folderPath")
+    if isinstance(folder_path, list) and folder_path:
+        parts = [str(p) for p in folder_path if p]
+        if parts:
+            return None, " / ".join(parts)
+
+    parent_folder_id = workflow.get("parentFolderId")
+    project_id = _workflow_project_id(workflow)
+    if parent_folder_id and project_id:
+        key = f"{project_id}:{parent_folder_id}"
+        if key in folder_map:
+            return str(parent_folder_id), folder_map[key]
+
+    return None, "Sem pasta"
+
+
+async def _fetch_agents_tree_for_instance(
+    config: N8nInstanceConfig,
+    *,
+    verify_ssl: bool = True,
+) -> list[N8nClientFolderNode]:
+    client = N8nInstanceClient(config, verify_ssl=verify_ssl)
+    summaries = await _list_all_workflows(client)
+    if not summaries:
+        return []
+
+    folder_map = await _load_folder_name_map(client)
+    sem = asyncio.Semaphore(8)
+
+    async def load_detail(summary: dict[str, Any]) -> Optional[dict[str, Any]]:
+        wid = summary.get("id")
+        if not wid:
+            return None
+        async with sem:
+            try:
+                return _unwrap_workflow(await client.get_workflow(str(wid)))
+            except Exception as exc:
+                logger.debug("get_workflow falhou id=%s: %s", wid, exc)
+                return None
+
+    details = await asyncio.gather(*[load_detail(s) for s in summaries])
+    grouped: dict[str, N8nClientFolderNode] = {}
+
+    for wf in details:
+        if not wf:
+            continue
+        if wf.get("isArchived"):
+            continue
+
+        folder_id, folder_name = _folder_name_for_workflow(wf, folder_map)
+        group_key = f"{folder_id or 'root'}:{folder_name}"
+        if group_key not in grouped:
+            grouped[group_key] = N8nClientFolderNode(
+                folder_id=folder_id,
+                folder_name=folder_name,
+                instance_id=config.id,
+                instance_label=config.label,
+            )
+
+        wid = str(wf.get("id") or "")
+        active = bool(wf.get("active"))
+        agent = is_agent_workflow(wf)
+        item = N8nAgentWorkflowItem(
+            workflow_id=wid,
+            workflow_name=str(wf.get("name") or "Sem nome"),
+            active=active,
+            is_agent=agent,
+            is_archived=bool(wf.get("isArchived")),
+            n8n_url=f"{config.base_url.rstrip('/')}/workflow/{wid}" if wid else None,
+        )
+        node = grouped[group_key]
+        node.workflows.append(item)
+        node.total_workflows += 1
+        if agent and active:
+            node.active_agents += 1
+
+    folders = list(grouped.values())
+    folders.sort(key=lambda f: (-f.active_agents, f.folder_name.lower()))
+    for folder in folders:
+        folder.workflows.sort(key=lambda w: (not w.is_agent, not w.active, w.workflow_name.lower()))
+    return folders
+
+
 async def _attach_last_failure(
     client: N8nInstanceClient,
     row: N8nWorkflowErrorRow,
@@ -550,6 +694,51 @@ class HqN8nService:
         rows = rows[:limit]
 
         result = N8nWorkflowErrorsResponse(period=period, rows=rows, generated_at=now)
+        await hq_cache_set(self.redis, cache_key, result, self.cache_ttl)
+        return result
+
+    async def get_agents_tree(self, *, force_refresh: bool = False) -> N8nAgentsTreeResponse:
+        cache_key = "hq:n8n:agents_tree"
+        if not force_refresh:
+            cached = await hq_cache_get(self.redis, cache_key, N8nAgentsTreeResponse)
+            if cached:
+                return cached
+
+        now = datetime.now(timezone.utc)
+        if not self.instances:
+            result = N8nAgentsTreeResponse(generated_at=now)
+            await hq_cache_set(self.redis, cache_key, result, self.cache_ttl)
+            return result
+
+        per_instance = await asyncio.gather(
+            *[
+                _fetch_agents_tree_for_instance(cfg, verify_ssl=self._verify_ssl)
+                for cfg in self.instances
+            ],
+            return_exceptions=True,
+        )
+
+        folders: list[N8nClientFolderNode] = []
+        for cfg, chunk in zip(self.instances, per_instance):
+            if isinstance(chunk, Exception):
+                logger.warning("agents tree falhou instance=%s: %s", cfg.id, chunk)
+                continue
+            folders.extend(chunk)
+
+        folders.sort(
+            key=lambda f: (
+                f.instance_label.lower(),
+                -f.active_agents,
+                f.folder_name.lower(),
+            )
+        )
+        total_agents = sum(f.active_agents for f in folders)
+        result = N8nAgentsTreeResponse(
+            total_active_agents=total_agents,
+            total_folders=len(folders),
+            folders=folders,
+            generated_at=now,
+        )
         await hq_cache_set(self.redis, cache_key, result, self.cache_ttl)
         return result
 

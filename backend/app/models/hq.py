@@ -98,3 +98,30 @@ class N8nWorkflowErrorsResponse(BaseModel):
     rows: list[N8nWorkflowErrorRow]
     cached: bool = False
     generated_at: datetime
+
+
+class N8nAgentWorkflowItem(BaseModel):
+    workflow_id: str
+    workflow_name: str
+    active: bool
+    is_agent: bool
+    is_archived: bool = False
+    n8n_url: Optional[str] = None
+
+
+class N8nClientFolderNode(BaseModel):
+    folder_id: Optional[str] = None
+    folder_name: str
+    instance_id: str
+    instance_label: str
+    active_agents: int = 0
+    total_workflows: int = 0
+    workflows: list[N8nAgentWorkflowItem] = Field(default_factory=list)
+
+
+class N8nAgentsTreeResponse(BaseModel):
+    total_active_agents: int = 0
+    total_folders: int = 0
+    folders: list[N8nClientFolderNode] = Field(default_factory=list)
+    cached: bool = False
+    generated_at: datetime

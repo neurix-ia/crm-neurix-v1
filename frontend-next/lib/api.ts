@@ -475,6 +475,33 @@ export type N8nWorkflowErrorsResponse = {
     generated_at: string;
 };
 
+export type N8nAgentWorkflowItem = {
+    workflow_id: string;
+    workflow_name: string;
+    active: boolean;
+    is_agent: boolean;
+    is_archived: boolean;
+    n8n_url?: string | null;
+};
+
+export type N8nClientFolderNode = {
+    folder_id?: string | null;
+    folder_name: string;
+    instance_id: string;
+    instance_label: string;
+    active_agents: number;
+    total_workflows: number;
+    workflows: N8nAgentWorkflowItem[];
+};
+
+export type N8nAgentsTreeResponse = {
+    total_active_agents: number;
+    total_folders: number;
+    folders: N8nClientFolderNode[];
+    cached: boolean;
+    generated_at: string;
+};
+
 export const getHqSummary = (period: HqPeriod = "7d", token?: string) =>
     apiGet<HqSummaryResponse>(`/api/admin/hq/summary?period=${period}`, token);
 
@@ -493,6 +520,16 @@ export const getHqN8nWorkflowErrors = (
     const p = new URLSearchParams({ period, limit: String(limit) });
     if (refresh) p.set("refresh", "true");
     return apiGet<N8nWorkflowErrorsResponse>(`/api/admin/hq/n8n/workflows/errors?${p}`, token);
+};
+
+export const getHqN8nAgentsTree = (refresh = false, token?: string) => {
+    const p = new URLSearchParams();
+    if (refresh) p.set("refresh", "true");
+    const qs = p.toString();
+    return apiGet<N8nAgentsTreeResponse>(
+        `/api/admin/hq/n8n/agents/tree${qs ? `?${qs}` : ""}`,
+        token
+    );
 };
 
 export const refreshHqN8nCache = (token?: string) =>
