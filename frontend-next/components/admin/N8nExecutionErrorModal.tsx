@@ -20,9 +20,10 @@ export default function N8nExecutionErrorModal({ row, onClose }: Props) {
 
     useEffect(() => {
         const token = localStorage.getItem("access_token");
-        if (!token || !row.last_execution_id) {
+        const executionId = row.last_execution_id;
+        if (!token || !executionId) {
             setLoading(false);
-            if (!row.last_execution_id) {
+            if (!executionId) {
                 setErr("Nenhuma execução com erro encontrada para este workflow no período.");
             }
             return;
@@ -32,7 +33,7 @@ export default function N8nExecutionErrorModal({ row, onClose }: Props) {
             try {
                 const data = await getHqN8nExecutionError(
                     row.instance_id,
-                    row.last_execution_id,
+                    executionId,
                     row.workflow_id ?? undefined,
                     token
                 );
