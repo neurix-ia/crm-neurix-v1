@@ -81,6 +81,12 @@ class N8nInstanceClient:
         params = {"includeData": "true" if include_data else "false"}
         return await self._get_json(f"/api/v1/executions/{execution_id}", params=params)
 
+    async def get_workflow(self, workflow_id: str) -> dict[str, Any]:
+        return await self._get_json(f"/api/v1/workflows/{workflow_id}")
+
+    async def get_folder(self, project_id: str, folder_id: str) -> dict[str, Any]:
+        return await self._get_json(f"/api/v1/projects/{project_id}/folders/{folder_id}")
+
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
         url = f"{self._base}{path}"
         async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT, verify=self._verify_ssl) as client:

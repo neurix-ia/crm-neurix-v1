@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -199,6 +200,103 @@ async def _fetch_errors_from_executions(
             )
         )
     return rows
+
+
+def _unwrap_workflow(payload: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload.get("data"), dict) and (
+        "name" in payload["data"] or "id" in payload["data"]
+    ):
+        return payload["data"]
+    return payload
+
+
+def _workflow_project_id(workflow: dict[str, Any]) -> Optional[str]:
+    shared = workflow.get("shared")
+    if isinstance(shared, list):
+        for item in shared:
+            if not isinstance(item, dict):
+                continue
+            if item.get("projectId"):
+                return str(item["projectId"])
+            project = item.get("project")
+            if isinstance(project, dict) and project.get("id"):
+                return str(project["id"])
+    home = workflow.get("homeProject")
+    if isinstance(home, dict) and home.get("id"):
+        return str(home["id"])
+    return None
+
+
+async def _folder_label_for_workflow(
+    client: N8nInstanceClient,
+    workflow: dict[str, Any],
+    folder_cache: dict[str, str],
+) -> Optional[str]:
+    folder_path = workflow.get("folderPath")
+    if isinstance(folder_path, list) and folder_path:
+        parts = [str(p) for p in folder_path if p]
+        if parts:
+            return " / ".join(parts)
+
+    parent_folder_id = workflow.get("parentFolderId")
+    if not parent_folder_id:
+        return None
+    project_id = _workflow_project_id(workflow)
+    if not project_id:
+        return None
+
+    cache_key = f"{project_id}:{parent_folder_id}"
+    if cache_key in folder_cache:
+        return folder_cache[cache_key]
+
+    try:
+        payload = await client.get_folder(project_id, str(parent_folder_id))
+        folder = _unwrap_workflow(payload)
+        name = folder.get("name")
+        if name:
+            folder_cache[cache_key] = str(name)
+            return str(name)
+    except Exception as exc:
+        logger.debug("folder lookup falhou project=%s folder=%s: %s", project_id, parent_folder_id, exc)
+    return None
+
+
+async def _enrich_rows_metadata(
+    client: N8nInstanceClient,
+    rows: list[N8nWorkflowErrorRow],
+) -> list[N8nWorkflowErrorRow]:
+    if not rows:
+        return rows
+
+    folder_cache: dict[str, str] = {}
+    workflow_cache: dict[str, dict[str, Any]] = {}
+
+    async def enrich_one(row: N8nWorkflowErrorRow) -> N8nWorkflowErrorRow:
+        wid = row.workflow_id
+        if not wid:
+            return row
+        if wid not in workflow_cache:
+            try:
+                workflow_cache[wid] = _unwrap_workflow(await client.get_workflow(wid))
+            except Exception as exc:
+                logger.warning("get_workflow falhou id=%s: %s", wid, exc)
+                workflow_cache[wid] = {}
+
+        wf = workflow_cache[wid]
+        updates: dict[str, Any] = {}
+        name = wf.get("name")
+        if name and row.workflow_name in ("", "Sem nome"):
+            updates["workflow_name"] = str(name)
+
+        folder_label = await _folder_label_for_workflow(client, wf, folder_cache)
+        if folder_label:
+            updates["project_name"] = folder_label
+
+        if updates:
+            return row.model_copy(update=updates)
+        return row
+
+    return list(await asyncio.gather(*[enrich_one(row) for row in rows]))
 
 
 async def _attach_last_failure(
@@ -443,7 +541,7 @@ class HqN8nService:
             enriched: list[N8nWorkflowErrorRow] = []
             for row in out:
                 enriched.append(await _attach_last_failure(client, row, start, end))
-            return enriched
+            return await _enrich_rows_metadata(client, enriched)
 
         per_instance = await asyncio.gather(*[fetch_errors(cfg) for cfg in self.instances])
         for chunk in per_instance:

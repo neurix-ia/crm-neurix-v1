@@ -320,7 +320,7 @@ export default function NeurixHqPage() {
                                     <tr className="border-b border-border-light dark:border-border-dark text-left text-xs uppercase tracking-wide text-text-secondary-light">
                                         <th className="px-4 py-3">#</th>
                                         <th className="px-4 py-3">Workflow</th>
-                                        <th className="px-4 py-3">Projeto</th>
+                                        <th className="px-4 py-3">Pasta (cliente)</th>
                                         <th className="px-4 py-3">Instância</th>
                                         <th className="px-4 py-3 text-right">Falhas</th>
                                         <th className="px-4 py-3">Última falha</th>

@@ -10,6 +10,8 @@ from app.services.hq_n8n_service import (
     _consolidate_metrics,
     _metric_value,
     _parse_instance_metrics,
+    _unwrap_workflow,
+    _workflow_project_id,
     period_to_dates,
 )
 from app.services.n8n_instance_client import N8nInstanceConfig
@@ -21,6 +23,14 @@ class TestHqN8nAggregation(unittest.TestCase):
         start, end_out = period_to_dates("7d", now=end)
         self.assertEqual((end - start).days, 7)
         self.assertEqual(end_out, end)
+
+    def test_unwrap_workflow_nested(self):
+        wf = _unwrap_workflow({"data": {"id": "1", "name": "Dorinha"}})
+        self.assertEqual(wf["name"], "Dorinha")
+
+    def test_workflow_project_id_from_shared(self):
+        wf = {"shared": [{"projectId": "proj-1"}]}
+        self.assertEqual(_workflow_project_id(wf), "proj-1")
 
     def test_metric_value_nested(self):
         payload = {"total": {"value": 100, "unit": "count", "deviation": 10}}
