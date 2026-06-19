@@ -566,7 +566,9 @@ export type InboxDTO = {
     tenant_id: string;
     funnel_id: string;
     name: string;
+    provider?: "uazapi" | "chatwoot";
     uazapi_settings: Record<string, unknown>;
+    chatwoot_settings?: Record<string, unknown>;
     created_at: string;
     updated_at: string;
 };
@@ -574,13 +576,17 @@ export type InboxDTO = {
 export type CreateInboxBody = {
     name: string;
     funnel_id: string;
+    provider?: "uazapi" | "chatwoot";
     uazapi_settings?: Record<string, unknown>;
+    chatwoot_settings?: Record<string, unknown>;
 };
 
 export type UpdateInboxBody = {
     name?: string;
     funnel_id?: string;
+    provider?: "uazapi" | "chatwoot";
     uazapi_settings?: Record<string, unknown>;
+    chatwoot_settings?: Record<string, unknown>;
 };
 
 /** Lista inboxes do tenant; superadmin pode passar tenantId (query tenant_id). */
@@ -605,6 +611,40 @@ export const deleteInbox = (inboxId: string, token?: string) =>
 export const listAdminInboxes = (tenantId: string, token?: string) =>
     apiGet<InboxDTO[]>(
         `/api/admin/inboxes?${new URLSearchParams({ tenant_id: tenantId }).toString()}`,
+        token
+    );
+
+// ── Chatwoot (WhatsApp Oficial) ──
+
+export type ChatwootConnectBody = {
+    inbox_id: string;
+    base_url: string;
+    account_id: string;
+    chatwoot_inbox_id: string;
+    api_access_token: string;
+    webhook_secret?: string;
+    phone_number_id?: string;
+};
+
+export type ChatwootStatus = {
+    status: string;
+    message?: string;
+    labels_count?: number;
+    account_id?: string;
+};
+
+export const connectChatwoot = (body: ChatwootConnectBody, token?: string) =>
+    apiPost<{ status: string; labels_count: number }>("/api/chatwoot/connect", body, token);
+
+export const getChatwootStatus = (inboxId: string, token?: string) =>
+    apiGet<ChatwootStatus>(
+        `/api/chatwoot/status?${new URLSearchParams({ inbox_id: inboxId }).toString()}`,
+        token
+    );
+
+export const disconnectChatwoot = (inboxId: string, token?: string) =>
+    apiDelete<{ status: string }>(
+        `/api/chatwoot/disconnect?${new URLSearchParams({ inbox_id: inboxId }).toString()}`,
         token
     );
 

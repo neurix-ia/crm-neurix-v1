@@ -7,6 +7,9 @@ import { useSearchParams } from "next/navigation";
 import { TenantOrgRequired } from "@/components/TenantOrgRequired";
 import {
     connectWhatsappInstance,
+    connectChatwoot,
+    disconnectChatwoot,
+    getChatwootStatus,
     createInbox,
     createMyFunnel,
     deleteInbox,
@@ -343,6 +346,156 @@ function InboxConnectModal(props: {
     );
 }
 
+function ChatwootConnectModal(props: {
+    open: boolean;
+    inbox: InboxDTO | null;
+    onClose: () => void;
+    token: string | undefined;
+    onAfterChange: () => void;
+}) {
+    const { open, inbox, onClose, token, onAfterChange } = props;
+    const inboxId = inbox?.id;
+    const [baseUrl, setBaseUrl] = useState("");
+    const [accountId, setAccountId] = useState("");
+    const [chatwootInboxId, setChatwootInboxId] = useState("");
+    const [apiToken, setApiToken] = useState("");
+    const [webhookSecret, setWebhookSecret] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState<string>("—");
+    const [statusMsg, setStatusMsg] = useState<string>("");
+
+    useEffect(() => {
+        if (!open || !inbox) return;
+        const cfg = (inbox.chatwoot_settings ?? {}) as Record<string, unknown>;
+        setBaseUrl(typeof cfg.base_url === "string" ? cfg.base_url : "");
+        setAccountId(cfg.account_id != null ? String(cfg.account_id) : "");
+        setChatwootInboxId(cfg.inbox_id != null ? String(cfg.inbox_id) : "");
+        setApiToken("");
+        setWebhookSecret(typeof cfg.webhook_secret === "string" ? cfg.webhook_secret : "");
+        setStatus("—");
+        setStatusMsg("");
+        if (cfg.api_access_token && inboxId) {
+            (async () => {
+                try {
+                    const res = await getChatwootStatus(inboxId, token);
+                    setStatus(res.status);
+                    if (res.message) setStatusMsg(res.message);
+                } catch {
+                    setStatus("desconhecido");
+                }
+            })();
+        }
+    }, [open, inbox, inboxId, token]);
+
+    const isConnected = status === "connected";
+
+    const handleConnect = async () => {
+        if (!inboxId) return;
+        if (!baseUrl.trim() || !accountId.trim() || !chatwootInboxId.trim() || !apiToken.trim()) {
+            alert("Preencha URL base, account_id, inbox do Chatwoot e o token.");
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await connectChatwoot(
+                {
+                    inbox_id: inboxId,
+                    base_url: baseUrl.trim(),
+                    account_id: accountId.trim(),
+                    chatwoot_inbox_id: chatwootInboxId.trim(),
+                    api_access_token: apiToken.trim(),
+                    webhook_secret: webhookSecret.trim() || undefined,
+                },
+                token
+            );
+            setStatus(res.status);
+            setStatusMsg("Etiquetas encontradas: " + (res.labels_count ?? 0));
+            onAfterChange();
+        } catch (e) {
+            alert(e instanceof Error ? e.message : "Erro ao conectar no Chatwoot");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDisconnect = async () => {
+        if (!inboxId || !confirm("Remover credenciais Chatwoot desta caixa?")) return;
+        setLoading(true);
+        try {
+            await disconnectChatwoot(inboxId, token);
+            setStatus("disconnected");
+            setApiToken("");
+            onAfterChange();
+        } catch {
+            alert("Erro ao desconectar");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!open || !inbox) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-border-light dark:border-border-dark overflow-hidden">
+                <div className="p-5 border-b border-border-light dark:border-border-dark flex items-start justify-between">
+                    <div>
+                        <h3 className="font-semibold">WhatsApp Oficial (Chatwoot)</h3>
+                        <p className="text-xs text-text-secondary-light mt-1">{inbox.name}</p>
+                    </div>
+                    <button type="button" onClick={onClose} className="text-text-secondary-light hover:text-primary">
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                    <p className="text-xs">
+                        Status:{" "}
+                        <span className={isConnected ? "text-green-600 font-medium" : "text-text-secondary-light"}>
+                            {isConnected ? "conectado" : status}
+                        </span>
+                        {statusMsg ? <span className="text-text-secondary-light"> {"—"} {statusMsg}</span> : null}
+                    </p>
+
+                    <div>
+                        <label className="text-xs font-semibold text-text-secondary-light uppercase tracking-wider mb-1 block">URL base do Chatwoot</label>
+                        <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://chatwoot.suaempresa.com" className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-border-light dark:border-border-dark rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-xs font-semibold text-text-secondary-light uppercase tracking-wider mb-1 block">Account ID</label>
+                            <input type="text" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="2" className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-border-light dark:border-border-dark rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-text-secondary-light uppercase tracking-wider mb-1 block">Inbox ID (Chatwoot)</label>
+                            <input type="text" value={chatwootInboxId} onChange={(e) => setChatwootInboxId(e.target.value)} placeholder="65" className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-border-light dark:border-border-dark rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none" />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-text-secondary-light uppercase tracking-wider mb-1 block">API Access Token</label>
+                        <input type="password" value={apiToken} onChange={(e) => setApiToken(e.target.value)} placeholder="api_access_token" className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-border-light dark:border-border-dark rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none" />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-text-secondary-light uppercase tracking-wider mb-1 block">Webhook Secret (HMAC, opcional)</label>
+                        <input type="text" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)} placeholder="secret de assinatura do webhook" className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-border-light dark:border-border-dark rounded-lg text-sm focus:ring-1 focus:ring-primary outline-none" />
+                    </div>
+
+                    <button type="button" onClick={() => void handleConnect()} disabled={loading} className="w-full py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-hover disabled:opacity-50">
+                        {loading ? "Validando…" : "Salvar e testar conexão"}
+                    </button>
+
+                    <div className="pt-4 border-t border-border-light dark:border-border-dark">
+                        <button type="button" onClick={() => void handleDisconnect()} disabled={loading} className="w-full py-2 px-4 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 dark:border-red-900 dark:text-red-400 dark:bg-red-900/20 text-sm font-medium flex items-center justify-center gap-2">
+                            <span className="material-symbols-outlined text-base">leak_remove</span>
+                            Remover credenciais Chatwoot
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ConfiguracoesContent() {
     const searchParams = useSearchParams();
     const fromAdmin = searchParams.get("from") === "admin";
@@ -381,6 +534,7 @@ function ConfiguracoesContent() {
     const [editBusy, setEditBusy] = useState(false);
 
     const [connectInbox, setConnectInbox] = useState<InboxDTO | null>(null);
+    const [connectChatwootInbox, setConnectChatwootInbox] = useState<InboxDTO | null>(null);
 
     const funnelById = useMemo(() => {
         const m = new Map<string, string>();
@@ -759,6 +913,13 @@ function ConfiguracoesContent() {
                                                         className="h-9 px-3 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20"
                                                     >
                                                         Conectar
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setConnectChatwootInbox(row); }}
+                                                        className="h-9 px-3 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20"
+                                                    >
+                                                        API Oficial
                                                     </button>
                                                     {canManage && (
                                                         <>
@@ -1238,6 +1399,14 @@ function ConfiguracoesContent() {
                 open={!!connectInbox}
                 inbox={connectInbox}
                 onClose={() => setConnectInbox(null)}
+                token={token}
+                onAfterChange={onCreated}
+            />
+
+            <ChatwootConnectModal
+                open={!!connectChatwootInbox}
+                inbox={connectChatwootInbox}
+                onClose={() => setConnectChatwootInbox(null)}
                 token={token}
                 onAfterChange={onCreated}
             />
