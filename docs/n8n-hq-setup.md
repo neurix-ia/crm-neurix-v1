@@ -45,9 +45,9 @@ Criar em cada n8n: **Settings → n8n API → Create API key**
 
 Scopes obrigatórios:
 
-- `insights:read` — KPIs (summary + by-workflow)
-- `workflow:read` — futuro: árvore de agentes
-- `execution:read` + `execution:list` — futuro: modal de erro (Fase B)
+- `insights:read` — KPIs (summary)
+- `execution:read` + `execution:list` — ranking de falhas + modal de erro (Fase B)
+- `workflow:read` — futuro: árvore de agentes (Fase C)
 
 Requisitos do plano n8n:
 
