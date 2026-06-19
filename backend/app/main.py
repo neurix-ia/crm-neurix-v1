@@ -16,6 +16,7 @@ from app.routers import (
     admin_api,
     auth,
     catalog_search,
+    chatwoot,
     clients,
     dashboard,
     funnels,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(keyword_rules.router, prefix="/api/keyword-rules", tags=["Regras de Keywords"])
     app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
     app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
+    app.include_router(chatwoot.router, prefix="/api/chatwoot", tags=["Chatwoot"])
 
     # ── Health Check ──
     @app.get("/api/health", tags=["Sistema"])
