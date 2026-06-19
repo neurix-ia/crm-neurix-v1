@@ -85,8 +85,16 @@ export default function LoginPage() {
                                 </p>
                                 <button
                                     type="button"
-                                    onClick={() => router.push("/admin")}
+                                    onClick={() => router.push("/admin/core")}
                                     className="w-full h-12 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
+                                >
+                                    <span className="material-symbols-outlined text-[20px]">dashboard</span>
+                                    Neurix HQ
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => router.push("/admin")}
+                                    className="w-full h-12 border border-border-light dark:border-border-dark font-bold rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center gap-2"
                                 >
                                     <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
                                     Console Admin

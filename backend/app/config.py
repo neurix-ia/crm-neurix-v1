@@ -29,6 +29,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Neurix HQ (outbound n8n instances) ──
+    # JSON array: [{"id":"neurix","label":"Neurix","base_url":"https://...","api_key":"..."}]
+    N8N_INSTANCES: str = ""
+    HQ_CACHE_TTL_SECONDS: int = 300
+
     # ── Supabase ──
     SUPABASE_URL: str = ""
     SUPABASE_PUBLIC_URL: str = ""  # Browser-accessible URL (e.g. https://your-supabase.domain)

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { getAuthMe } from "@/lib/api";
 
 const NAV = [
+    { href: "/admin/core", label: "Neurix HQ" },
     { href: "/admin", label: "Início" },
     { href: "/admin/organizations", label: "Organizações" },
     { href: "/admin/users", label: "Usuários" },

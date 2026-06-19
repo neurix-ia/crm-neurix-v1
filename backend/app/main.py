@@ -15,6 +15,8 @@ from app.observability import metrics
 from app.routers import (
     admin_api,
     auth,
+    hq_n8n,
+    hq_summary,
     catalog_search,
     chatwoot,
     clients,
@@ -49,6 +51,10 @@ async def lifespan(app: FastAPI):
     if not cfg.N8N_API_KEY:
         logger.warning(
             "N8N_API_KEY não configurada — endpoint /api/n8n/webhook rejeitará todos os requests"
+        )
+    if not (cfg.N8N_INSTANCES or "").strip():
+        logger.warning(
+            "N8N_INSTANCES não configurado — Neurix HQ (/admin/core) não conseguirá consultar n8n"
         )
     yield
     print(f"👋 {cfg.APP_NAME} shutting down...")
@@ -90,6 +96,8 @@ def create_app() -> FastAPI:
     # ── Routers ──
     app.include_router(auth.router, prefix="/api/auth", tags=["Autenticação"])
     app.include_router(admin_api.router, prefix="/api/admin", tags=["Console Admin"])
+    app.include_router(hq_summary.router, prefix="/api/admin", tags=["Neurix HQ"])
+    app.include_router(hq_n8n.router, prefix="/api/admin", tags=["Neurix HQ"])
     app.include_router(organizations.router, prefix="/api/organizations", tags=["Organizações"])
     app.include_router(users.router, prefix="/api/users", tags=["Usuários (Admin)"])
     app.include_router(funnels.router, prefix="/api/funnels", tags=["Funis"])

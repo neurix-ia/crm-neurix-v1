@@ -387,6 +387,98 @@ export type AuthMe = {
 
 export const getAuthMe = (token?: string) => apiGet<AuthMe>("/api/auth/me", token);
 
+// ── Neurix HQ (superadmin) ──
+
+export type HqLevel = "green" | "yellow" | "red" | "gray";
+export type HqPeriod = "24h" | "7d" | "30d";
+
+export type HqAlert = {
+    level: HqLevel;
+    message: string;
+    module: string;
+    link?: string | null;
+};
+
+export type HqModuleStatus = {
+    id: string;
+    label: string;
+    level: HqLevel;
+    summary: string;
+    alerts: HqAlert[];
+    enabled: boolean;
+};
+
+export type HqSummaryResponse = {
+    modules: HqModuleStatus[];
+    generated_at: string;
+    cached: boolean;
+};
+
+export type N8nInstanceMetrics = {
+    id: string;
+    label: string;
+    status: "ok" | "error";
+    error_message?: string | null;
+    total_executions: number;
+    failed_executions: number;
+    failure_rate: number;
+    time_saved_minutes: number;
+    average_run_time_seconds: number;
+    metrics_raw?: { deviations?: Record<string, number | null> } | null;
+};
+
+export type N8nOverviewResponse = {
+    period: HqPeriod;
+    start_date: string;
+    end_date: string;
+    instances: N8nInstanceMetrics[];
+    consolidated: N8nInstanceMetrics;
+    cached: boolean;
+    generated_at: string;
+};
+
+export type N8nWorkflowErrorRow = {
+    instance_id: string;
+    instance_label: string;
+    workflow_id?: string | null;
+    workflow_name: string;
+    project_name?: string | null;
+    total_executions: number;
+    failed_executions: number;
+    failure_rate: number;
+    average_run_time_seconds: number;
+};
+
+export type N8nWorkflowErrorsResponse = {
+    period: HqPeriod;
+    rows: N8nWorkflowErrorRow[];
+    cached: boolean;
+    generated_at: string;
+};
+
+export const getHqSummary = (period: HqPeriod = "7d", token?: string) =>
+    apiGet<HqSummaryResponse>(`/api/admin/hq/summary?period=${period}`, token);
+
+export const getHqN8nOverview = (period: HqPeriod = "7d", refresh = false, token?: string) => {
+    const p = new URLSearchParams({ period });
+    if (refresh) p.set("refresh", "true");
+    return apiGet<N8nOverviewResponse>(`/api/admin/hq/n8n/overview?${p}`, token);
+};
+
+export const getHqN8nWorkflowErrors = (
+    period: HqPeriod = "7d",
+    limit = 20,
+    refresh = false,
+    token?: string
+) => {
+    const p = new URLSearchParams({ period, limit: String(limit) });
+    if (refresh) p.set("refresh", "true");
+    return apiGet<N8nWorkflowErrorsResponse>(`/api/admin/hq/n8n/workflows/errors?${p}`, token);
+};
+
+export const refreshHqN8nCache = (token?: string) =>
+    apiPost<{ ok: boolean; keys_deleted: number }>("/api/admin/hq/n8n/refresh", {}, token);
+
 // ── Organizações ──
 
 export type OrganizationDTO = {

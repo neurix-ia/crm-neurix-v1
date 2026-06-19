@@ -168,19 +168,34 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                     );
                 })}
                 {isSuperadmin && (
+                    <>
                     <Link
-                        href="/admin"
+                        href="/admin/core"
                         className={`flex items-center gap-3 px-3 py-2.5 mt-2 rounded-xl transition-colors ${
-                            pathname.startsWith("/admin")
+                            pathname.startsWith("/admin/core")
                                 ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
                                 : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
                         }`}
                     >
-                        <span className={`material-symbols-outlined ${pathname.startsWith("/admin") ? "filled" : ""}`}>
+                        <span className={`material-symbols-outlined ${pathname.startsWith("/admin/core") ? "filled" : ""}`}>
+                            dashboard
+                        </span>
+                        <span className="text-sm">Neurix HQ</span>
+                    </Link>
+                    <Link
+                        href="/admin"
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                            pathname.startsWith("/admin") && !pathname.startsWith("/admin/core")
+                                ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
+                                : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
+                        }`}
+                    >
+                        <span className={`material-symbols-outlined ${pathname.startsWith("/admin") && !pathname.startsWith("/admin/core") ? "filled" : ""}`}>
                             admin_panel_settings
                         </span>
                         <span className="text-sm">Console Admin</span>
                     </Link>
+                    </>
                 )}
             </nav>
 
