@@ -10,9 +10,11 @@ import {
     type HqLevel,
     type HqPeriod,
     type N8nOverviewResponse,
+    type N8nWorkflowErrorRow,
     type N8nWorkflowErrorsResponse,
     type HqSummaryResponse,
 } from "@/lib/api";
+import N8nExecutionErrorModal from "@/components/admin/N8nExecutionErrorModal";
 
 const PERIODS: { value: HqPeriod; label: string }[] = [
     { value: "24h", label: "24h" },
@@ -97,6 +99,7 @@ export default function NeurixHqPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [err, setErr] = useState<string | null>(null);
+    const [selectedRow, setSelectedRow] = useState<N8nWorkflowErrorRow | null>(null);
 
     const load = useCallback(
         async (forceRefresh = false) => {
@@ -320,7 +323,7 @@ export default function NeurixHqPage() {
                                         <th className="px-4 py-3">Projeto</th>
                                         <th className="px-4 py-3">Instância</th>
                                         <th className="px-4 py-3 text-right">Falhas</th>
-                                        <th className="px-4 py-3 text-right">Taxa</th>
+                                        <th className="px-4 py-3">Última falha</th>
                                         <th className="px-4 py-3 text-right">Run méd.</th>
                                     </tr>
                                 </thead>
@@ -328,7 +331,8 @@ export default function NeurixHqPage() {
                                     {errors?.rows.map((row, idx) => (
                                         <tr
                                             key={`${row.instance_id}-${row.workflow_id ?? idx}`}
-                                            className="border-b border-border-light/50 dark:border-border-dark/50 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+                                            onClick={() => setSelectedRow(row)}
+                                            className="border-b border-border-light/50 dark:border-border-dark/50 hover:bg-primary/5 cursor-pointer"
                                         >
                                             <td className="px-4 py-3 text-text-secondary-light">{idx + 1}</td>
                                             <td className="px-4 py-3 font-medium">{row.workflow_name}</td>
@@ -343,7 +347,11 @@ export default function NeurixHqPage() {
                                             <td className="px-4 py-3 text-right font-semibold text-red-600 dark:text-red-400">
                                                 {row.failed_executions}
                                             </td>
-                                            <td className="px-4 py-3 text-right">{row.failure_rate}%</td>
+                                            <td className="px-4 py-3 text-xs text-text-secondary-light">
+                                                {row.last_failed_at
+                                                    ? new Date(row.last_failed_at).toLocaleString("pt-BR")
+                                                    : "—"}
+                                            </td>
                                             <td className="px-4 py-3 text-right text-text-secondary-light">
                                                 {row.average_run_time_seconds.toFixed(2)}s
                                             </td>
@@ -355,9 +363,13 @@ export default function NeurixHqPage() {
                     </div>
                 )}
                 <p className="text-xs text-text-secondary-light mt-2">
-                    Fase B: clique na linha para ver causa do erro (modal).
+                    Clique em uma linha para ver a causa do erro.
                 </p>
             </section>
+
+            {selectedRow && (
+                <N8nExecutionErrorModal row={selectedRow} onClose={() => setSelectedRow(null)} />
+            )}
         </div>
     );
 }

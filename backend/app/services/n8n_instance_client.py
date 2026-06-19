@@ -60,6 +60,27 @@ class N8nInstanceClient:
         }
         return await self._get_json("/api/v1/insights/by-workflow", params=params)
 
+    async def list_executions(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"limit": str(min(limit, 250))}
+        if workflow_id:
+            params["workflowId"] = workflow_id
+        if status:
+            params["status"] = status
+        if cursor:
+            params["cursor"] = cursor
+        return await self._get_json("/api/v1/executions", params=params)
+
+    async def get_execution(self, execution_id: str, *, include_data: bool = False) -> dict[str, Any]:
+        params = {"includeData": "true" if include_data else "false"}
+        return await self._get_json(f"/api/v1/executions/{execution_id}", params=params)
+
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
         url = f"{self._base}{path}"
         async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT, verify=self._verify_ssl) as client:

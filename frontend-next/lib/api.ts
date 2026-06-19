@@ -447,6 +447,25 @@ export type N8nWorkflowErrorRow = {
     failed_executions: number;
     failure_rate: number;
     average_run_time_seconds: number;
+    last_execution_id?: string | null;
+    last_failed_at?: string | null;
+};
+
+export type N8nExecutionErrorDetail = {
+    instance_id: string;
+    instance_label: string;
+    instance_base_url: string;
+    workflow_id?: string | null;
+    workflow_name?: string | null;
+    execution_id: string;
+    status?: string | null;
+    started_at?: string | null;
+    stopped_at?: string | null;
+    node_name?: string | null;
+    message: string;
+    description?: string | null;
+    stack?: string | null;
+    n8n_execution_url?: string | null;
 };
 
 export type N8nWorkflowErrorsResponse = {
@@ -478,6 +497,21 @@ export const getHqN8nWorkflowErrors = (
 
 export const refreshHqN8nCache = (token?: string) =>
     apiPost<{ ok: boolean; keys_deleted: number }>("/api/admin/hq/n8n/refresh", {}, token);
+
+export const getHqN8nExecutionError = (
+    instanceId: string,
+    executionId: string,
+    workflowId?: string,
+    token?: string
+) => {
+    const p = new URLSearchParams();
+    if (workflowId) p.set("workflow_id", workflowId);
+    const qs = p.toString();
+    return apiGet<N8nExecutionErrorDetail>(
+        `/api/admin/hq/n8n/executions/${encodeURIComponent(instanceId)}/${encodeURIComponent(executionId)}${qs ? `?${qs}` : ""}`,
+        token
+    );
+};
 
 // ── Organizações ──
 

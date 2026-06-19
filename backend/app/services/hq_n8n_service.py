@@ -13,12 +13,14 @@ import redis.asyncio as aioredis
 from app.config import Settings
 from app.models.hq import (
     HqPeriod,
+    N8nExecutionErrorDetail,
     N8nInstanceMetrics,
     N8nOverviewResponse,
     N8nWorkflowErrorRow,
     N8nWorkflowErrorsResponse,
 )
 from app.services.hq_cache import hq_cache_get, hq_cache_set
+from app.services.n8n_execution_parser import extract_execution_error
 from app.services.n8n_instance_client import N8nInstanceClient, N8nInstanceConfig
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,176 @@ def period_to_dates(period: HqPeriod, *, now: Optional[datetime] = None) -> tupl
     else:
         start = end - timedelta(days=7)
     return start, end
+
+
+def _parse_iso_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_insights_workflow_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return [r for r in data["data"] if isinstance(r, dict)]
+    return []
+
+
+def _execution_duration_seconds(ex: dict[str, Any]) -> float:
+    started = _parse_iso_dt(ex.get("startedAt"))
+    stopped = _parse_iso_dt(ex.get("stoppedAt"))
+    if started and stopped:
+        return max(0.0, (stopped - started).total_seconds())
+    return 0.0
+
+
+def _row_from_insights(cfg: N8nInstanceConfig, row: dict[str, Any]) -> Optional[N8nWorkflowErrorRow]:
+    failed = int(row.get("failed") or 0)
+    if failed <= 0:
+        return None
+    fr = float(row.get("failureRate") or 0)
+    if fr > 1:
+        fr = fr / 100.0
+    return N8nWorkflowErrorRow(
+        instance_id=cfg.id,
+        instance_label=cfg.label,
+        workflow_id=row.get("workflowId"),
+        workflow_name=str(row.get("workflowName") or "Sem nome"),
+        project_name=row.get("projectName"),
+        total_executions=int(row.get("total") or 0),
+        failed_executions=failed,
+        failure_rate=round(fr * 100, 2),
+        average_run_time_seconds=float(row.get("averageRunTime") or 0),
+    )
+
+
+async def _fetch_errors_from_executions(
+    cfg: N8nInstanceConfig,
+    start: datetime,
+    end: datetime,
+    *,
+    verify_ssl: bool,
+    max_pages: int = 6,
+) -> list[N8nWorkflowErrorRow]:
+    """Ranking via Public API /executions (insights/by-workflow não está na Public API)."""
+    client = N8nInstanceClient(cfg, verify_ssl=verify_ssl)
+    aggregated: dict[str, dict[str, Any]] = {}
+    cursor: Optional[str] = None
+
+    for _ in range(max_pages):
+        try:
+            payload = await client.list_executions(status="error", limit=100, cursor=cursor)
+        except Exception as exc:
+            logger.warning("n8n list_executions falhou instance=%s: %s", cfg.id, exc)
+            break
+
+        items = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or not items:
+            break
+
+        for ex in items:
+            if not isinstance(ex, dict):
+                continue
+            started = _parse_iso_dt(ex.get("startedAt"))
+            if started and started < start:
+                continue
+            if started and started > end:
+                continue
+            wid = ex.get("workflowId")
+            if wid is None:
+                continue
+            key = str(wid)
+            entry = aggregated.get(key)
+            if not entry:
+                entry = {
+                    "workflow_id": key,
+                    "workflow_name": str(ex.get("workflowName") or "Sem nome"),
+                    "failed_executions": 0,
+                    "total_duration": 0.0,
+                    "last_execution_id": None,
+                    "last_failed_at": None,
+                }
+                aggregated[key] = entry
+            entry["failed_executions"] += 1
+            entry["total_duration"] += _execution_duration_seconds(ex)
+            ex_id = ex.get("id")
+            if ex_id and started and (
+                entry["last_failed_at"] is None or started > entry["last_failed_at"]
+            ):
+                entry["last_failed_at"] = started
+                entry["last_execution_id"] = str(ex_id)
+            if ex.get("workflowName"):
+                entry["workflow_name"] = str(ex["workflowName"])
+
+        cursor = payload.get("nextCursor") if isinstance(payload, dict) else None
+        if not cursor:
+            break
+
+    rows: list[N8nWorkflowErrorRow] = []
+    for entry in aggregated.values():
+        failed = int(entry["failed_executions"])
+        if failed <= 0:
+            continue
+        avg_rt = entry["total_duration"] / failed if failed else 0.0
+        rows.append(
+            N8nWorkflowErrorRow(
+                instance_id=cfg.id,
+                instance_label=cfg.label,
+                workflow_id=entry["workflow_id"],
+                workflow_name=entry["workflow_name"],
+                failed_executions=failed,
+                failure_rate=0.0,
+                average_run_time_seconds=round(avg_rt, 2),
+                last_execution_id=entry["last_execution_id"],
+                last_failed_at=entry["last_failed_at"],
+            )
+        )
+    return rows
+
+
+async def _attach_last_failure(
+    client: N8nInstanceClient,
+    row: N8nWorkflowErrorRow,
+    start: datetime,
+    end: datetime,
+) -> N8nWorkflowErrorRow:
+    if row.last_execution_id or not row.workflow_id:
+        return row
+    try:
+        payload = await client.list_executions(
+            workflow_id=row.workflow_id, status="error", limit=5
+        )
+    except Exception:
+        return row
+    items = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return row
+    best_id: Optional[str] = None
+    best_at: Optional[datetime] = None
+    for ex in items:
+        if not isinstance(ex, dict):
+            continue
+        started = _parse_iso_dt(ex.get("startedAt"))
+        if started and (started < start or started > end):
+            continue
+        ex_id = ex.get("id")
+        if ex_id and started and (best_at is None or started > best_at):
+            best_at = started
+            best_id = str(ex_id)
+    if best_id:
+        return row.model_copy(update={"last_execution_id": best_id, "last_failed_at": best_at})
+    return row
 
 
 def _metric_value(payload: dict[str, Any], key: str) -> float:
@@ -245,38 +417,33 @@ class HqN8nService:
 
         async def fetch_errors(cfg: N8nInstanceConfig) -> list[N8nWorkflowErrorRow]:
             client = N8nInstanceClient(cfg, verify_ssl=self._verify_ssl)
+            out: list[N8nWorkflowErrorRow] = []
+
             try:
                 payload = await client.get_insights_by_workflow(start, end, take=min(limit, 50))
+                for row in _extract_insights_workflow_rows(payload):
+                    parsed = _row_from_insights(cfg, row)
+                    if parsed:
+                        out.append(parsed)
+            except httpx.HTTPStatusError as exc:
+                if exc.response is not None and exc.response.status_code != 404:
+                    logger.warning(
+                        "n8n by-workflow falhou instance=%s status=%s",
+                        cfg.id,
+                        exc.response.status_code,
+                    )
             except Exception as exc:
                 logger.warning("n8n by-workflow falhou instance=%s: %s", cfg.id, exc)
-                return []
-            data = payload.get("data") if isinstance(payload, dict) else None
-            if not isinstance(data, list):
-                return []
-            out: list[N8nWorkflowErrorRow] = []
-            for row in data:
-                if not isinstance(row, dict):
-                    continue
-                failed = int(row.get("failed") or 0)
-                if failed <= 0:
-                    continue
-                fr = float(row.get("failureRate") or 0)
-                if fr > 1:
-                    fr = fr / 100.0
-                out.append(
-                    N8nWorkflowErrorRow(
-                        instance_id=cfg.id,
-                        instance_label=cfg.label,
-                        workflow_id=row.get("workflowId"),
-                        workflow_name=str(row.get("workflowName") or "Sem nome"),
-                        project_name=row.get("projectName"),
-                        total_executions=int(row.get("total") or 0),
-                        failed_executions=failed,
-                        failure_rate=round(fr * 100, 2),
-                        average_run_time_seconds=float(row.get("averageRunTime") or 0),
-                    )
+
+            if not out:
+                out = await _fetch_errors_from_executions(
+                    cfg, start, end, verify_ssl=self._verify_ssl
                 )
-            return out
+
+            enriched: list[N8nWorkflowErrorRow] = []
+            for row in out:
+                enriched.append(await _attach_last_failure(client, row, start, end))
+            return enriched
 
         per_instance = await asyncio.gather(*[fetch_errors(cfg) for cfg in self.instances])
         for chunk in per_instance:
@@ -287,6 +454,52 @@ class HqN8nService:
         result = N8nWorkflowErrorsResponse(period=period, rows=rows, generated_at=now)
         await hq_cache_set(self.redis, cache_key, result, self.cache_ttl)
         return result
+
+    def _instance_config(self, instance_id: str) -> N8nInstanceConfig:
+        for cfg in self.instances:
+            if cfg.id == instance_id:
+                return cfg
+        raise KeyError(f"Instância n8n desconhecida: {instance_id}")
+
+    async def get_execution_error(
+        self,
+        instance_id: str,
+        execution_id: str,
+        *,
+        workflow_id: Optional[str] = None,
+    ) -> N8nExecutionErrorDetail:
+        cfg = self._instance_config(instance_id)
+        client = N8nInstanceClient(cfg, verify_ssl=self._verify_ssl)
+        payload = await client.get_execution(execution_id, include_data=True)
+        root = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        parsed = extract_execution_error(payload if isinstance(payload, dict) else {})
+
+        wf_id = workflow_id or (str(root.get("workflowId")) if root.get("workflowId") else None)
+        wf_name = root.get("workflowName")
+        started = _parse_iso_dt(root.get("startedAt"))
+        stopped = _parse_iso_dt(root.get("stoppedAt"))
+        status = root.get("status")
+
+        n8n_url = None
+        if wf_id:
+            n8n_url = f"{cfg.base_url.rstrip('/')}/workflow/{wf_id}/executions/{execution_id}"
+
+        return N8nExecutionErrorDetail(
+            instance_id=cfg.id,
+            instance_label=cfg.label,
+            instance_base_url=cfg.base_url,
+            workflow_id=wf_id,
+            workflow_name=str(wf_name) if wf_name else None,
+            execution_id=execution_id,
+            status=str(status) if status else None,
+            started_at=started,
+            stopped_at=stopped,
+            node_name=parsed.get("node_name"),
+            message=parsed.get("message") or "Erro desconhecido",
+            description=parsed.get("description"),
+            stack=parsed.get("stack"),
+            n8n_execution_url=n8n_url,
+        )
 
     async def invalidate_cache(self) -> int:
         from app.services.hq_cache import hq_cache_delete_pattern

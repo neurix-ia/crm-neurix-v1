@@ -72,6 +72,25 @@ class N8nWorkflowErrorRow(BaseModel):
     failed_executions: int = 0
     failure_rate: float = 0.0
     average_run_time_seconds: float = 0.0
+    last_execution_id: Optional[str] = None
+    last_failed_at: Optional[datetime] = None
+
+
+class N8nExecutionErrorDetail(BaseModel):
+    instance_id: str
+    instance_label: str
+    instance_base_url: str
+    workflow_id: Optional[str]
+    workflow_name: Optional[str]
+    execution_id: str
+    status: Optional[str] = None
+    started_at: Optional[datetime] = None
+    stopped_at: Optional[datetime] = None
+    node_name: Optional[str] = None
+    message: str
+    description: Optional[str] = None
+    stack: Optional[str] = None
+    n8n_execution_url: Optional[str] = None
 
 
 class N8nWorkflowErrorsResponse(BaseModel):
