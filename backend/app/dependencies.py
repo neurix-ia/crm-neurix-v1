@@ -111,6 +111,16 @@ async def get_redis(settings: Settings = Depends(get_settings)) -> aioredis.Redi
     return _redis_pool
 
 
+async def get_redis_optional(settings: Settings = Depends(get_settings)) -> aioredis.Redis | None:
+    """Redis para HQ — retorna None se indisponível (HQ funciona sem cache)."""
+    try:
+        client = await get_redis(settings)
+        await client.ping()
+        return client
+    except Exception:
+        return None
+
+
 # ── Auth Dependency ──
 
 # We need a separate anon-key client for auth/session flows so database

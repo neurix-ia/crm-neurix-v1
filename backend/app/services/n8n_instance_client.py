@@ -20,9 +20,10 @@ class N8nInstanceConfig:
 
 
 class N8nInstanceClient:
-    def __init__(self, config: N8nInstanceConfig) -> None:
+    def __init__(self, config: N8nInstanceConfig, *, verify_ssl: bool = True) -> None:
         self.config = config
         self._base = config.base_url.rstrip("/")
+        self._verify_ssl = verify_ssl
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -61,7 +62,7 @@ class N8nInstanceClient:
 
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
         url = f"{self._base}{path}"
-        async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT, verify=self._verify_ssl) as client:
             response = await client.get(url, headers=self._headers(), params=params)
             response.raise_for_status()
             data = response.json()

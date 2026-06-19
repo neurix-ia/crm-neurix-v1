@@ -24,7 +24,7 @@ def _automation_level(overview_failed: int, failure_rate: float, instances_ok: i
 
 
 class HqSummaryService:
-    def __init__(self, settings: Settings, redis: aioredis.Redis) -> None:
+    def __init__(self, settings: Settings, redis: aioredis.Redis | None = None) -> None:
         self.settings = settings
         self.redis = redis
         self.n8n = HqN8nService(settings, redis)

@@ -28,6 +28,10 @@ def parse_n8n_instances(settings: Settings) -> list[N8nInstanceConfig]:
     raw = (settings.N8N_INSTANCES or "").strip()
     if not raw:
         return []
+    if (raw.startswith("'") and raw.endswith("'")) or (
+        len(raw) > 2 and raw[0] == raw[-1] == '"'
+    ):
+        raw = raw[1:-1].strip()
     try:
         items = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -141,8 +145,10 @@ async def _fetch_instance_overview(
     config: N8nInstanceConfig,
     start: datetime,
     end: datetime,
+    *,
+    verify_ssl: bool = True,
 ) -> N8nInstanceMetrics:
-    client = N8nInstanceClient(config)
+    client = N8nInstanceClient(config, verify_ssl=verify_ssl)
     try:
         summary = await client.get_insights_summary(start, end)
         return _parse_instance_metrics(config, summary)
@@ -166,11 +172,12 @@ async def _fetch_instance_overview(
 
 
 class HqN8nService:
-    def __init__(self, settings: Settings, redis: aioredis.Redis) -> None:
+    def __init__(self, settings: Settings, redis: aioredis.Redis | None = None) -> None:
         self.settings = settings
         self.redis = redis
         self.instances = parse_n8n_instances(settings)
         self.cache_ttl = settings.HQ_CACHE_TTL_SECONDS
+        self._verify_ssl = settings.N8N_SSL_VERIFY
 
     def _cache_key(self, suffix: str, period: HqPeriod) -> str:
         return f"hq:n8n:{suffix}:{period}"
@@ -200,7 +207,10 @@ class HqN8nService:
         import asyncio
 
         instance_metrics = await asyncio.gather(
-            *[_fetch_instance_overview(cfg, start, end) for cfg in self.instances]
+            *[
+                _fetch_instance_overview(cfg, start, end, verify_ssl=self._verify_ssl)
+                for cfg in self.instances
+            ]
         )
         consolidated = _consolidate_metrics(list(instance_metrics))
         result = N8nOverviewResponse(
@@ -234,7 +244,7 @@ class HqN8nService:
         import asyncio
 
         async def fetch_errors(cfg: N8nInstanceConfig) -> list[N8nWorkflowErrorRow]:
-            client = N8nInstanceClient(cfg)
+            client = N8nInstanceClient(cfg, verify_ssl=self._verify_ssl)
             try:
                 payload = await client.get_insights_by_workflow(start, end, take=min(limit, 50))
             except Exception as exc:

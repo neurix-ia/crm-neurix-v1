@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # JSON array: [{"id":"neurix","label":"Neurix","base_url":"https://...","api_key":"..."}]
     N8N_INSTANCES: str = ""
     HQ_CACHE_TTL_SECONDS: int = 300
+    N8N_SSL_VERIFY: bool = True
 
     # ── Supabase ──
     SUPABASE_URL: str = ""

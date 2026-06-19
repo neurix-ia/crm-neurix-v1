@@ -76,6 +76,18 @@ São secrets **diferentes**.
 3. Login como superadmin → **Neurix HQ** ou `/admin/core`.
 4. Se cards ficarem cinza: verificar log `N8N_INSTANCES não configurado` ou erro HTTP na instância.
 
+## Troubleshooting "Internal Server Error" no HQ
+
+1. **Redeploy** do backend com a branch `staging` (rotas `/api/admin/hq/*`).
+2. **`N8N_INSTANCES`** no Dokploy — JSON em uma linha, aspas duplas.
+3. **`REDIS_HOST` / `REDIS_PASSWORD`** — se Redis estiver down, versões recentes do HQ funcionam sem cache; confira mesmo assim.
+4. Logs do container backend ao abrir `/admin/core` (erro `hq_summary` ou `hq n8n`).
+5. Teste manual (substitua `TOKEN`):
+
+```bash
+curl -s -H "Authorization: Bearer TOKEN" "https://crm-staging.wbtech.dev/api/admin/hq/summary?period=7d"
+```
+
 ## Endpoints (superadmin JWT)
 
 - `GET /api/admin/hq/summary?period=7d`
