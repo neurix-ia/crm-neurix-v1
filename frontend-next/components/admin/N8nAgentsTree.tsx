@@ -27,7 +27,8 @@ function filterFolder(
         if (tag !== "all" && !wf.tags.includes(tag)) return false;
         return true;
     });
-    if (workflows.length === 0) return null;
+    const hasFilters = status !== "all" || tag !== "all" || folderKey !== "all";
+    if (workflows.length === 0 && hasFilters) return null;
 
     const active_agents = workflows.filter((w) => w.is_agent && w.active).length;
     return { ...folder, workflows, total_workflows: workflows.length, active_agents };

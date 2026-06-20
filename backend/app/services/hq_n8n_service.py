@@ -407,38 +407,100 @@ async def _list_all_workflows(client: N8nInstanceClient) -> list[dict[str, Any]]
         raise
 
 
-async def _fetch_folders_for_project(
+_FOLDER_SELECT_FIELDS = [
+    "id",
+    "name",
+    "path",
+    "parentFolderId",
+    "parentFolder",
+    "workflowCount",
+    "subFolderCount",
+    "tags",
+    "project",
+]
+
+
+async def _fetch_folders_page(
+    client: N8nInstanceClient,
+    project_id: str,
+    *,
+    parent_folder_id: Optional[str],
+    skip: int,
+    use_select: bool,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Retorna (pastas, use_select ainda válido)."""
+    try:
+        if use_select:
+            folders_payload = await client.list_folders(
+                project_id,
+                take=100,
+                skip=skip,
+                select_fields=_FOLDER_SELECT_FIELDS,
+                parent_folder_id=parent_folder_id,
+            )
+        else:
+            folders_payload = await client.list_folders(
+                project_id,
+                take=100,
+                skip=skip,
+                parent_folder_id=parent_folder_id,
+            )
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response is not None else 0
+        if use_select and code in (400, 422):
+            logger.info("list_folders select rejeitado project=%s — retry sem select", project_id)
+            return await _fetch_folders_page(
+                client,
+                project_id,
+                parent_folder_id=parent_folder_id,
+                skip=skip,
+                use_select=False,
+            )
+        raise
+    chunk = folders_payload.get("data") or []
+    if not isinstance(chunk, list):
+        chunk = []
+    return [f for f in chunk if isinstance(f, dict)], use_select
+
+
+async def _fetch_all_folders_for_project(
     client: N8nInstanceClient,
     project_id: str,
 ) -> list[dict[str, Any]]:
+    """Lista pastas recursivamente (raiz + subpastas via parentFolderId)."""
     rows: list[dict[str, Any]] = []
-    skip = 0
-    select_fields = ["id", "name", "path", "parentFolderId", "workflowCount", "tags", "project"]
+    seen_ids: set[str] = set()
+    queue: list[Optional[str]] = [None]
     use_select = True
-    while True:
-        try:
-            if use_select:
-                folders_payload = await client.list_folders(
-                    project_id, take=100, skip=skip, select_fields=select_fields
-                )
-            else:
-                folders_payload = await client.list_folders(project_id, take=100, skip=skip)
-        except httpx.HTTPStatusError as exc:
-            code = exc.response.status_code if exc.response is not None else 0
-            if use_select and code in (400, 422):
-                logger.info("list_folders select rejeitado project=%s — retry sem select", project_id)
-                use_select = False
-                skip = 0
-                rows = []
-                continue
-            raise
-        chunk = folders_payload.get("data") or []
-        if not isinstance(chunk, list) or not chunk:
-            break
-        rows.extend([f for f in chunk if isinstance(f, dict)])
-        if len(chunk) < 100:
-            break
-        skip += 100
+
+    while queue:
+        parent_id = queue.pop(0)
+        skip = 0
+        while True:
+            chunk, use_select = await _fetch_folders_page(
+                client,
+                project_id,
+                parent_folder_id=parent_id,
+                skip=skip,
+                use_select=use_select,
+            )
+            if not chunk:
+                break
+            for folder in chunk:
+                fid = folder.get("id")
+                if not fid:
+                    continue
+                fid_str = str(fid)
+                if fid_str in seen_ids:
+                    continue
+                seen_ids.add(fid_str)
+                rows.append(folder)
+                sub_count = folder.get("subFolderCount")
+                if sub_count is None or int(sub_count or 0) > 0:
+                    queue.append(fid_str)
+            if len(chunk) < 100:
+                break
+            skip += 100
     return rows
 
 
@@ -451,13 +513,16 @@ async def _discover_project_ids(
         pid = _workflow_project_id(wf)
         if pid:
             found.add(pid)
-    if found:
-        return list(found)
     try:
-        payload = await client.list_projects(limit=100)
-        for project in payload.get("data") or []:
-            if isinstance(project, dict) and project.get("id"):
-                found.add(str(project["id"]))
+        cursor: Optional[str] = None
+        while True:
+            payload = await client.list_projects(limit=100, cursor=cursor)
+            for project in payload.get("data") or []:
+                if isinstance(project, dict) and project.get("id"):
+                    found.add(str(project["id"]))
+            cursor = payload.get("nextCursor")
+            if not cursor:
+                break
     except Exception as exc:
         logger.warning("list_projects falhou: %s", exc)
     return list(found)
@@ -468,9 +533,32 @@ def _folder_label_from_record(folder: dict[str, Any]) -> str:
     if isinstance(path, list) and path:
         parts = [str(p) for p in path if p]
         if parts:
-            return " / ".join(parts)
+            return parts[-1]
     name = folder.get("name")
     return str(name) if name else "Sem pasta"
+
+
+def _folder_group_key(folder_id: Optional[str], folder_name: str) -> str:
+    return f"{folder_id or 'root'}:{folder_name}"
+
+
+def _ensure_empty_folders_in_tree(
+    grouped: dict[str, N8nClientFolderNode],
+    all_folders: list[dict[str, Any]],
+    config: N8nInstanceConfig,
+) -> None:
+    for folder in all_folders:
+        fid = folder.get("id")
+        display = _folder_label_from_record(folder)
+        group_key = _folder_group_key(str(fid) if fid else None, display)
+        if group_key in grouped:
+            continue
+        grouped[group_key] = N8nClientFolderNode(
+            folder_id=str(fid) if fid else None,
+            folder_name=display,
+            instance_id=config.id,
+            instance_label=config.label,
+        )
 
 
 def _folder_tag_names(folder: dict[str, Any]) -> set[str]:
@@ -539,37 +627,22 @@ def _match_folder_for_workflow(
 async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
     """Mapa projectId:folderId -> nome da pasta."""
     names: dict[str, str] = {}
-    try:
-        projects_payload = await client.list_projects(limit=100)
-        projects = projects_payload.get("data") or []
-    except Exception as exc:
-        logger.warning("list_projects falhou: %s", exc)
-        return names
-
-    for project in projects:
-        if not isinstance(project, dict):
+    project_ids = await _discover_project_ids(client, [])
+    for project_id in project_ids:
+        try:
+            folder_rows = await _fetch_all_folders_for_project(client, project_id)
+        except Exception as exc:
+            logger.debug("list_folders falhou project=%s: %s", project_id, exc)
             continue
-        project_id = project.get("id")
-        if not project_id:
-            continue
-        skip = 0
-        while True:
-            try:
-                folder_rows = await _fetch_folders_for_project(client, str(project_id))
-            except Exception as exc:
-                logger.debug("list_folders falhou project=%s: %s", project_id, exc)
-                break
-            if not folder_rows:
-                break
-            for folder in folder_rows:
-                fid = folder.get("id")
-                fname = folder.get("name")
-                if fid and fname:
-                    names[f"{project_id}:{fid}"] = str(fname)
-                path = folder.get("path")
-                if fid and isinstance(path, list) and path:
-                    names[f"{project_id}:{fid}:path"] = " / ".join(str(p) for p in path if p)
-            break
+        for folder in folder_rows:
+            fid = folder.get("id")
+            if not fid:
+                continue
+            label = _folder_label_from_record(folder)
+            names[f"{project_id}:{fid}"] = label
+            path = folder.get("path")
+            if isinstance(path, list) and path:
+                names[f"{project_id}:{fid}:path"] = " / ".join(str(p) for p in path if p)
     return names
 
 
@@ -642,7 +715,7 @@ async def _fetch_agents_tree_for_instance(
     all_folders: list[dict[str, Any]] = []
     for project_id in project_ids:
         try:
-            all_folders.extend(await _fetch_folders_for_project(client, project_id))
+            all_folders.extend(await _fetch_all_folders_for_project(client, project_id))
         except Exception as exc:
             logger.warning("list_folders falhou project=%s instance=%s: %s", project_id, config.id, exc)
 
@@ -661,7 +734,7 @@ async def _fetch_agents_tree_for_instance(
                 folder_id = str(wf.get("parentFolderId"))
                 folder_name = label
 
-        group_key = f"{folder_id or 'root'}:{folder_name}"
+        group_key = _folder_group_key(folder_id, folder_name)
         if group_key not in grouped:
             grouped[group_key] = N8nClientFolderNode(
                 folder_id=folder_id,
@@ -688,8 +761,10 @@ async def _fetch_agents_tree_for_instance(
         if agent and active:
             node.active_agents += 1
 
+    _ensure_empty_folders_in_tree(grouped, all_folders, config)
+
     folders = list(grouped.values())
-    folders.sort(key=lambda f: (-f.active_agents, f.folder_name.lower()))
+    folders.sort(key=lambda f: (-f.active_agents, -f.total_workflows, f.folder_name.lower()))
     for folder in folders:
         folder.workflows.sort(key=lambda w: (not w.is_agent, not w.active, w.workflow_name.lower()))
     return _InstanceTreeResult(folders=folders, workflow_count=len(summaries))
@@ -950,7 +1025,7 @@ class HqN8nService:
         return result
 
     async def get_agents_tree(self, *, force_refresh: bool = False) -> N8nAgentsTreeResponse:
-        cache_key = "hq:n8n:agents_tree:v3"
+        cache_key = "hq:n8n:agents_tree:v4"
         if not force_refresh:
             cached = await hq_cache_get(self.redis, cache_key, N8nAgentsTreeResponse)
             if cached:
@@ -1020,6 +1095,13 @@ class HqN8nService:
                 )
             for wf in folder.workflows:
                 tag_set.update(wf.tags)
+        sem_pasta_key = "sem pasta"
+        folder_options = [
+            opt
+            for opt in folder_options
+            if opt.folder_name.strip().lower() != sem_pasta_key
+            or opt.folder_id is not None
+        ]
         folder_options.sort(key=lambda f: (f.instance_label.lower(), f.folder_name.lower()))
         result = N8nAgentsTreeResponse(
             total_active_agents=total_agents,

@@ -53,11 +53,25 @@ class TestHqN8nAggregation(unittest.TestCase):
         self.assertEqual(fid, "f1")
         self.assertEqual(name, "Villa Dora")
 
-    def test_normalize_workflow_tags(self):
-        from app.services.hq_n8n_service import _normalize_workflow_tags
+    def test_folder_label_uses_path_leaf(self):
+        from app.services.hq_n8n_service import _folder_label_from_record
 
-        wf = {"tags": [{"name": "prod"}, {"name": "staging"}]}
-        self.assertEqual(_normalize_workflow_tags(wf), ["prod", "staging"])
+        folder = {"name": "Thamy Festas", "path": ["Personal", "Neurix", "Thamy Festas"]}
+        self.assertEqual(_folder_label_from_record(folder), "Thamy Festas")
+
+    def test_ensure_empty_folders_in_tree(self):
+        from app.services.hq_n8n_service import _ensure_empty_folders_in_tree
+
+        cfg = N8nInstanceConfig(id="neurix", label="Neurix", base_url="https://x", api_key="k")
+        grouped: dict = {}
+        all_folders = [
+            {"id": "f-empty", "name": "Leads Infinitos", "path": ["Neurix", "Leads Infinitos"]},
+        ]
+        _ensure_empty_folders_in_tree(grouped, all_folders, cfg)
+        self.assertEqual(len(grouped), 1)
+        node = next(iter(grouped.values()))
+        self.assertEqual(node.folder_name, "Leads Infinitos")
+        self.assertEqual(node.total_workflows, 0)
 
     def test_metric_value_nested(self):
         payload = {"total": {"value": 100, "unit": "count", "deviation": 10}}

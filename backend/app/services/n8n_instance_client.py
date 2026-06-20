@@ -124,10 +124,13 @@ class N8nInstanceClient:
         take: int = 100,
         skip: int = 0,
         select_fields: Optional[list[str]] = None,
+        parent_folder_id: Optional[str] = None,
     ) -> dict[str, Any]:
         params: dict[str, str] = {"take": str(take), "skip": str(skip)}
         if select_fields:
             params["select"] = json.dumps(select_fields)
+        if parent_folder_id is not None:
+            params["filter"] = json.dumps({"parentFolderId": parent_folder_id})
         return await self._get_json(f"/api/v1/projects/{project_id}/folders", params=params)
 
     async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
