@@ -28,6 +28,19 @@ class TestHqN8nAggregation(unittest.TestCase):
         wf = _unwrap_workflow({"data": {"id": "1", "name": "Dorinha"}})
         self.assertEqual(wf["name"], "Dorinha")
 
+    def test_unwrap_workflow_key(self):
+        wf = _unwrap_workflow({"workflow": {"id": "2", "name": "Agente X"}})
+        self.assertEqual(wf["name"], "Agente X")
+
+    def test_match_folder_by_name(self):
+        from app.services.hq_n8n_service import _match_folder_for_workflow
+
+        folders = [{"id": "f1", "name": "Villa Dora", "project": {"id": "p1"}}]
+        wf = {"id": "w1", "name": "Prod: Agente Villa Dora"}
+        fid, name = _match_folder_for_workflow(wf, folders, {"f1": folders[0]})
+        self.assertEqual(fid, "f1")
+        self.assertEqual(name, "Villa Dora")
+
     def test_workflow_project_id_from_shared(self):
         wf = {"shared": [{"projectId": "proj-1"}]}
         self.assertEqual(_workflow_project_id(wf), "proj-1")

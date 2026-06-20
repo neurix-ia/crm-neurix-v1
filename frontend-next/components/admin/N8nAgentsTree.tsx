@@ -12,7 +12,16 @@ function matchesStatus(active: boolean, filter: StatusFilter) {
     return true;
 }
 
-function filterFolder(folder: N8nClientFolderNode, status: StatusFilter, tag: string): N8nClientFolderNode | null {
+function filterFolder(
+    folder: N8nClientFolderNode,
+    status: StatusFilter,
+    tag: string,
+    folderKey: string
+): N8nClientFolderNode | null {
+    if (folderKey !== "all") {
+        const key = `${folder.instance_id}:${folder.folder_id ?? folder.folder_name}`;
+        if (key !== folderKey) return null;
+    }
     const workflows = folder.workflows.filter((wf) => {
         if (!matchesStatus(wf.active, status)) return false;
         if (tag !== "all" && !wf.tags.includes(tag)) return false;
@@ -98,15 +107,16 @@ function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
 export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | null }) {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
     const [tagFilter, setTagFilter] = useState("all");
+    const [folderFilter, setFolderFilter] = useState("all");
 
     const filtered = useMemo(() => {
         if (!tree) return null;
         const folders = tree.folders
-            .map((f) => filterFolder(f, statusFilter, tagFilter))
+            .map((f) => filterFolder(f, statusFilter, tagFilter, folderFilter))
             .filter((f): f is N8nClientFolderNode => f !== null);
         const activeAgents = folders.reduce((n, f) => n + f.active_agents, 0);
         return { folders, activeAgents };
-    }, [tree, statusFilter, tagFilter]);
+    }, [tree, statusFilter, tagFilter, folderFilter]);
 
     if (!tree) {
         return <p className="text-sm text-text-secondary-light">Carregando árvore…</p>;
@@ -131,6 +141,7 @@ export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | 
     }
 
     const tags = tree.available_tags ?? [];
+    const folderOptions = tree.available_folders ?? [];
 
     return (
         <div>
@@ -147,6 +158,22 @@ export default function N8nAgentsTree({ tree }: { tree: N8nAgentsTreeResponse | 
                     {tree.cached && <span className="text-xs text-text-secondary-light">· cache</span>}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                        value={folderFilter}
+                        onChange={(e) => setFolderFilter(e.target.value)}
+                        className="text-sm rounded-xl border border-border-light dark:border-border-dark bg-transparent px-3 py-1.5 max-w-[220px]"
+                        aria-label="Filtrar por pasta"
+                    >
+                        <option value="all">Todas as pastas</option>
+                        {folderOptions.map((f) => {
+                            const key = `${f.instance_id}:${f.folder_id ?? f.folder_name}`;
+                            return (
+                                <option key={key} value={key}>
+                                    {f.folder_name} ({f.instance_label})
+                                </option>
+                            );
+                        })}
+                    </select>
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}

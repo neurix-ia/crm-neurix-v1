@@ -495,6 +495,13 @@ export type N8nClientFolderNode = {
     workflows: N8nAgentWorkflowItem[];
 };
 
+export type N8nAgentsTreeFolderOption = {
+    folder_id?: string | null;
+    folder_name: string;
+    instance_id: string;
+    instance_label: string;
+};
+
 export type N8nAgentsTreeInstanceStatus = {
     instance_id: string;
     instance_label: string;
@@ -507,6 +514,7 @@ export type N8nAgentsTreeResponse = {
     total_active_agents: number;
     total_folders: number;
     available_tags: string[];
+    available_folders: N8nAgentsTreeFolderOption[];
     folders: N8nClientFolderNode[];
     instances: N8nAgentsTreeInstanceStatus[];
     cached: boolean;

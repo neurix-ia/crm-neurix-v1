@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 from app.config import Settings
 from app.models.hq import (
     HqPeriod,
+    N8nAgentsTreeFolderOption,
     N8nAgentsTreeInstanceStatus,
     N8nAgentWorkflowItem,
     N8nAgentsTreeResponse,
@@ -209,6 +210,10 @@ async def _fetch_errors_from_executions(
 
 
 def _unwrap_workflow(payload: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload.get("workflow"), dict) and (
+        "name" in payload["workflow"] or "id" in payload["workflow"]
+    ):
+        return payload["workflow"]
     if isinstance(payload.get("data"), dict) and (
         "name" in payload["data"] or "id" in payload["data"]
     ):
@@ -408,7 +413,7 @@ async def _fetch_folders_for_project(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     skip = 0
-    select_fields = ["id", "name", "path", "parentFolderId"]
+    select_fields = ["id", "name", "path", "parentFolderId", "workflowCount", "tags", "project"]
     use_select = True
     while True:
         try:
@@ -423,6 +428,8 @@ async def _fetch_folders_for_project(
             if use_select and code in (400, 422):
                 logger.info("list_folders select rejeitado project=%s — retry sem select", project_id)
                 use_select = False
+                skip = 0
+                rows = []
                 continue
             raise
         chunk = folders_payload.get("data") or []
@@ -433,6 +440,100 @@ async def _fetch_folders_for_project(
             break
         skip += 100
     return rows
+
+
+async def _discover_project_ids(
+    client: N8nInstanceClient,
+    workflows: list[dict[str, Any]],
+) -> list[str]:
+    found: set[str] = set()
+    for wf in workflows:
+        pid = _workflow_project_id(wf)
+        if pid:
+            found.add(pid)
+    if found:
+        return list(found)
+    try:
+        payload = await client.list_projects(limit=100)
+        for project in payload.get("data") or []:
+            if isinstance(project, dict) and project.get("id"):
+                found.add(str(project["id"]))
+    except Exception as exc:
+        logger.warning("list_projects falhou: %s", exc)
+    return list(found)
+
+
+def _folder_label_from_record(folder: dict[str, Any]) -> str:
+    path = folder.get("path")
+    if isinstance(path, list) and path:
+        parts = [str(p) for p in path if p]
+        if parts:
+            return " / ".join(parts)
+    name = folder.get("name")
+    return str(name) if name else "Sem pasta"
+
+
+def _folder_tag_names(folder: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for item in folder.get("tags") or []:
+        if isinstance(item, str) and item.strip():
+            names.add(item.strip().lower())
+        elif isinstance(item, dict) and item.get("name"):
+            names.add(str(item["name"]).lower())
+    return names
+
+
+def _match_folder_for_workflow(
+    workflow: dict[str, Any],
+    folders: list[dict[str, Any]],
+    folder_by_id: dict[str, dict[str, Any]],
+) -> tuple[Optional[str], str]:
+    name_map: dict[str, str] = {}
+    for folder in folders:
+        fid = folder.get("id")
+        if not fid:
+            continue
+        project = folder.get("project") or folder.get("homeProject")
+        pid = project.get("id") if isinstance(project, dict) else None
+        fname = folder.get("name")
+        if pid and fname:
+            name_map[f"{pid}:{fid}"] = str(fname)
+        path = folder.get("path")
+        if pid and isinstance(path, list) and path:
+            name_map[f"{pid}:{fid}:path"] = " / ".join(str(p) for p in path if p)
+
+    folder_id, folder_name = _folder_name_for_workflow(workflow, name_map)
+    if folder_name != "Sem pasta":
+        return folder_id, folder_name
+
+    parent_folder_id = workflow.get("parentFolderId")
+    if parent_folder_id:
+        parent = folder_by_id.get(str(parent_folder_id))
+        if parent:
+            return str(parent_folder_id), _folder_label_from_record(parent)
+
+    wf_tags = {t.lower() for t in _normalize_workflow_tags(workflow)}
+    if wf_tags:
+        for folder in folders:
+            if _folder_tag_names(folder) & wf_tags:
+                fid = str(folder.get("id") or "")
+                return (fid or None), _folder_label_from_record(folder)
+
+    wf_name = str(workflow.get("name") or "").lower()
+    best: Optional[tuple[str, str]] = None
+    best_len = 0
+    for folder in folders:
+        fname = str(folder.get("name") or "")
+        if len(fname) < 3:
+            continue
+        if fname.lower() in wf_name and len(fname) > best_len:
+            fid = str(folder.get("id") or "")
+            best = (fid or None, _folder_label_from_record(folder))
+            best_len = len(fname)
+    if best:
+        return best
+
+    return None, "Sem pasta"
 
 
 async def _load_folder_name_map(client: N8nInstanceClient) -> dict[str, str]:
@@ -521,8 +622,6 @@ async def _fetch_agents_tree_for_instance(
             error="Nenhum workflow retornado — verifique scope workflow:list na API key.",
         )
 
-    folder_map = await _load_folder_name_map(client)
-    folder_cache = dict(folder_map)
     sem = asyncio.Semaphore(8)
 
     async def load_detail(summary: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -537,16 +636,31 @@ async def _fetch_agents_tree_for_instance(
                 logger.debug("get_workflow falhou id=%s: %s", wid, exc)
                 return summary
 
-    details = await asyncio.gather(*[load_detail(s) for s in summaries])
+    details = [wf for wf in await asyncio.gather(*[load_detail(s) for s in summaries]) if wf]
+    project_ids = await _discover_project_ids(client, details)
+
+    all_folders: list[dict[str, Any]] = []
+    for project_id in project_ids:
+        try:
+            all_folders.extend(await _fetch_folders_for_project(client, project_id))
+        except Exception as exc:
+            logger.warning("list_folders falhou project=%s instance=%s: %s", project_id, config.id, exc)
+
+    folder_by_id = {str(f["id"]): f for f in all_folders if f.get("id")}
+    folder_cache = await _load_folder_name_map(client)
     grouped: dict[str, N8nClientFolderNode] = {}
 
     for wf in details:
-        if not wf:
-            continue
         if wf.get("isArchived"):
             continue
 
-        folder_id, folder_name = await _resolve_folder_for_workflow(client, wf, folder_cache)
+        folder_id, folder_name = _match_folder_for_workflow(wf, all_folders, folder_by_id)
+        if folder_name == "Sem pasta" and wf.get("parentFolderId"):
+            label = await _folder_label_for_workflow(client, wf, folder_cache)
+            if label:
+                folder_id = str(wf.get("parentFolderId"))
+                folder_name = label
+
         group_key = f"{folder_id or 'root'}:{folder_name}"
         if group_key not in grouped:
             grouped[group_key] = N8nClientFolderNode(
@@ -836,7 +950,7 @@ class HqN8nService:
         return result
 
     async def get_agents_tree(self, *, force_refresh: bool = False) -> N8nAgentsTreeResponse:
-        cache_key = "hq:n8n:agents_tree:v2"
+        cache_key = "hq:n8n:agents_tree:v3"
         if not force_refresh:
             cached = await hq_cache_get(self.redis, cache_key, N8nAgentsTreeResponse)
             if cached:
@@ -890,13 +1004,28 @@ class HqN8nService:
         )
         total_agents = sum(f.active_agents for f in folders)
         tag_set: set[str] = set()
+        folder_options: list[N8nAgentsTreeFolderOption] = []
+        seen_folders: set[str] = set()
         for folder in folders:
+            key = f"{folder.instance_id}:{folder.folder_id or folder.folder_name}"
+            if key not in seen_folders:
+                seen_folders.add(key)
+                folder_options.append(
+                    N8nAgentsTreeFolderOption(
+                        folder_id=folder.folder_id,
+                        folder_name=folder.folder_name,
+                        instance_id=folder.instance_id,
+                        instance_label=folder.instance_label,
+                    )
+                )
             for wf in folder.workflows:
                 tag_set.update(wf.tags)
+        folder_options.sort(key=lambda f: (f.instance_label.lower(), f.folder_name.lower()))
         result = N8nAgentsTreeResponse(
             total_active_agents=total_agents,
             total_folders=len(folders),
             available_tags=sorted(tag_set, key=str.lower),
+            available_folders=folder_options,
             folders=folders,
             instances=instance_statuses,
             generated_at=now,

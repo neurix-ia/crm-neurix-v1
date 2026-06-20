@@ -128,10 +128,18 @@ class N8nAgentsTreeInstanceStatus(BaseModel):
     workflow_count: int = 0
 
 
+class N8nAgentsTreeFolderOption(BaseModel):
+    folder_id: Optional[str] = None
+    folder_name: str
+    instance_id: str
+    instance_label: str
+
+
 class N8nAgentsTreeResponse(BaseModel):
     total_active_agents: int = 0
     total_folders: int = 0
     available_tags: list[str] = Field(default_factory=list)
+    available_folders: list[N8nAgentsTreeFolderOption] = Field(default_factory=list)
     folders: list[N8nClientFolderNode] = Field(default_factory=list)
     instances: list[N8nAgentsTreeInstanceStatus] = Field(default_factory=list)
     cached: bool = False
