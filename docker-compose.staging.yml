@@ -42,6 +42,7 @@ services:
       - TWO_FACTOR_ENABLED=${TWO_FACTOR_ENABLED:-false}
       - N8N_API_KEY=${N8N_API_KEY}
       - N8N_INSTANCES=${N8N_INSTANCES}
+      - GOOGLE_SA_JSON=${GOOGLE_SA_JSON}
       - HQ_CACHE_TTL_SECONDS=${HQ_CACHE_TTL_SECONDS:-300}
       - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-https://crm-staging.wbtech.dev}
       - UAZAPI_URL=${UAZAPI_URL:-}

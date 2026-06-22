@@ -8,6 +8,7 @@ importados de forma preguiçosa para não pesar no boot nem nos testes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -26,14 +27,45 @@ def week_bounds_from_key(week_key: str, tz: str = "America/Sao_Paulo") -> tuple[
     return week_start, week_end
 
 
+def _load_sa_info(sa_json: str) -> dict:
+    """Aceita o JSON cru (1 linha) OU base64 do JSON — base64 evita problemas de
+    aspas/quebras de linha no env do docker-compose."""
+    s = (sa_json or "").strip()
+    try:
+        return json.loads(s)
+    except Exception:
+        decoded = base64.b64decode(s).decode("utf-8")
+        return json.loads(decoded)
+
+
+def _resolve_worksheet(sh, worksheet: str):
+    """Resolve a aba por gid numérico, título exato, título normalizado ou 1ª aba."""
+    w = str(worksheet or "").strip()
+    if w.isdigit():
+        try:
+            return sh.get_worksheet_by_id(int(w))
+        except Exception:
+            pass
+    try:
+        return sh.worksheet(w)
+    except Exception:
+        pass
+    target = w.casefold()
+    for ws in sh.worksheets():
+        if str(ws.title).strip().casefold() == target:
+            return ws
+    return sh.sheet1
+
+
 def _read_sheet_sync(sa_json: str, spreadsheet_id: str, worksheet: str) -> list[dict]:
-    """Leitura síncrona via gspread (rodada em executor)."""
+    """Leitura síncrona via gspread (rodada em executor). Robusto a aba por gid/nome."""
     import gspread
     from google.oauth2.service_account import Credentials
 
-    creds = Credentials.from_service_account_info(json.loads(sa_json), scopes=_SCOPES)
+    creds = Credentials.from_service_account_info(_load_sa_info(sa_json), scopes=_SCOPES)
     gc = gspread.authorize(creds)
-    ws = gc.open_by_key(spreadsheet_id).worksheet(worksheet)
+    sh = gc.open_by_key(spreadsheet_id)
+    ws = _resolve_worksheet(sh, worksheet)
     return ws.get_all_records()
 
 
