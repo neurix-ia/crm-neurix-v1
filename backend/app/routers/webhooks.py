@@ -79,6 +79,32 @@ async def receive_uazapi_webhook(
     return {"status": "queued", "message": "Webhook recebido e enfileirado para processamento."}
 
 
+@router.post("/chatwoot")
+async def receive_chatwoot_webhook(
+    request: Request,
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """
+    Recebe webhooks do Chatwoot (message_created / conversation_updated) e enfileira.
+    A verificacao HMAC (X-Chatwoot-Signature) e feita no worker, pois o secret e por-inbox.
+    """
+    raw = await request.body()
+    try:
+        body = json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload JSON invalido.")
+
+    event = {
+        "source": "chatwoot",
+        "payload": body,
+        "raw_body": raw.decode("utf-8", errors="replace"),
+        "signature": request.headers.get("x-chatwoot-signature"),
+        "timestamp": request.headers.get("x-chatwoot-timestamp"),
+    }
+    await redis.rpush("neurix:webhook_queue", json.dumps(event))
+    return {"status": "queued", "message": "Webhook Chatwoot enfileirado."}
+
+
 @router.post("/invoice")
 async def receive_invoice_webhook(
     request: Request,

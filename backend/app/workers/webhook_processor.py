@@ -14,6 +14,9 @@ from app.services.keyword_engine import keyword_engine
 from app.services.lead_finalized_spawn import maybe_spawn_inbound_whatsapp_lead_if_finalized
 from app.services.phone_normalize import digits_only, format_brazil_phone_display
 from app.services.webhook_lead_context import (
+    _chatwoot_ids,
+    ensure_stage_for_label,
+    find_inbox_by_chatwoot,
     find_inbox_by_instance_name,
     find_inbox_by_instance_token,
     find_inbox_for_tenant,
@@ -424,6 +427,228 @@ async def process_uazapi_event(event: dict, supabase_client, redis_client):
         await log_error_to_redis(redis_client, f"Failed keyword engine / moving lead: {e}")
 
 
+def _verify_chatwoot_signature(secret: str, timestamp: str, raw_body: str, signature: str) -> bool:
+    import hashlib
+    import hmac
+
+    try:
+        mac = hmac.new(secret.encode(), f"{timestamp}.{raw_body}".encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(f"sha256={mac}", signature or "")
+    except Exception:
+        return False
+
+
+def _chatwoot_message_content(payload: dict):
+    """(content_type, content, media_url, media_mimetype, media_filename) — midia vem em attachments[]."""
+    content = payload.get("content")
+    atts = payload.get("attachments")
+    if not atts:
+        conv = payload.get("conversation") or {}
+        msgs = conv.get("messages") if isinstance(conv, dict) else None
+        if isinstance(msgs, list) and msgs:
+            atts = msgs[0].get("attachments")
+    if isinstance(atts, list) and atts:
+        att = atts[0]
+        ft = str(att.get("file_type") or "").lower()
+        mapping = {"image": "image", "audio": "audio", "video": "video", "file": "document"}
+        return mapping.get(ft, "document"), content, att.get("data_url"), None, None
+    return "text", content, None, None, None
+
+
+def _chatwoot_chat_id(sender: dict, contact_inbox) -> str:
+    ident = sender.get("identifier") if isinstance(sender, dict) else None
+    if ident:
+        return str(ident)
+    src = None
+    if isinstance(contact_inbox, dict):
+        src = contact_inbox.get("source_id")
+    if not src and isinstance(sender, dict) and sender.get("phone_number"):
+        src = digits_only(str(sender.get("phone_number")))
+    return f"{src}@s.whatsapp.net" if src else ""
+
+
+def _chatwoot_label_change(payload: dict):
+    ca = payload.get("changed_attributes")
+    if isinstance(ca, list):
+        for item in ca:
+            if isinstance(item, dict) and "label_list" in item:
+                ll = item.get("label_list") or {}
+                return (ll.get("current_value") or [], ll.get("previous_value") or [])
+    return (None, None)
+
+
+async def _chatwoot_handle_message(payload, inbox_row, supabase_client, redis_client):
+    conv = payload.get("conversation") or {}
+    conversation_id = conv.get("id") or payload.get("conversation_id")
+    message_type = str(payload.get("message_type") or "incoming")
+    is_outgoing = message_type == "outgoing"
+    sender = payload.get("sender") or {}
+    sender_phone = str(sender.get("phone_number") or "").lstrip("+")
+    sender_name = str(sender.get("name") or "")
+    contact_inbox = conv.get("contact_inbox") if isinstance(conv, dict) else None
+    chat_id = _chatwoot_chat_id(sender, contact_inbox)
+    source_id = payload.get("source_id")
+    whatsapp_message_id = str(source_id or payload.get("id") or "")
+    content_type, content, media_url, media_mimetype, media_filename = _chatwoot_message_content(payload)
+    caption = content if content_type != "text" else None
+
+    if not chat_id:
+        await log_error_to_redis(redis_client, "Chatwoot: sem chat_id; ignorando mensagem.")
+        return
+
+    if whatsapp_message_id:
+        try:
+            ex = (
+                supabase_client.table("chat_messages")
+                .select("id")
+                .eq("whatsapp_message_id", whatsapp_message_id)
+                .limit(1)
+                .execute()
+            )
+            if ex.data:
+                return
+        except Exception:
+            pass
+
+    lead_data = _find_existing_lead_for_inbox(supabase_client, inbox_row=inbox_row, chat_id=chat_id)
+    lead_id = lead_data["id"] if lead_data else None
+
+    if not lead_data and not is_outgoing:
+        tenant_id = str(inbox_row["tenant_id"])
+        funnel_id = str(inbox_row["funnel_id"])
+        inbox_id = str(inbox_row["id"])
+        stage_slug = get_first_stage_slug_for_funnel(supabase_client, tenant_id=tenant_id, funnel_id=funnel_id)
+        formatted_phone = ""
+        if sender_phone:
+            pdig = digits_only(sender_phone)
+            formatted_phone = format_brazil_phone_display(pdig) or pdig
+        client_id = resolve_or_create_crm_client(
+            supabase_client, tenant_id=tenant_id, sender_phone_raw=sender_phone, sender_name=sender_name
+        )
+        new_lead = {
+            "tenant_id": tenant_id,
+            "inbox_id": inbox_id,
+            "funnel_id": funnel_id,
+            "whatsapp_chat_id": chat_id,
+            "contact_name": sender_name or sender_phone or "Desconhecido",
+            "company_name": sender_name or sender_phone or "Novo Lead",
+            "phone": formatted_phone or None,
+            "stage": stage_slug,
+            "value": 0,
+        }
+        if client_id:
+            new_lead["client_id"] = client_id
+        try:
+            ins = supabase_client.table("leads").insert(new_lead).execute()
+            if ins.data:
+                lead_data = ins.data[0]
+                lead_id = lead_data["id"]
+                await log_error_to_redis(redis_client, f"Chatwoot: lead criado (inbox={inbox_id}): {lead_id}")
+        except Exception as e:
+            await log_error_to_redis(redis_client, f"Chatwoot: falha ao criar lead: {e}")
+
+    message_record = {
+        "whatsapp_chat_id": chat_id,
+        "whatsapp_message_id": whatsapp_message_id or None,
+        "lead_id": lead_id,
+        "tenant_id": lead_data.get("tenant_id") if lead_data else str(inbox_row["tenant_id"]),
+        "direction": "outgoing" if is_outgoing else "incoming",
+        "content_type": content_type,
+        "content": content,
+        "media_url": media_url,
+        "media_mimetype": media_mimetype,
+        "media_filename": media_filename,
+        "caption": caption,
+        "sender_name": sender_name,
+        "sender_phone": sender_phone,
+        "external_provider": "chatwoot",
+        "external_conversation_id": str(conversation_id) if conversation_id is not None else None,
+        "metadata": {"source": "chatwoot", "message_type": message_type},
+    }
+    message_record = {k: v for k, v in message_record.items() if v is not None}
+    try:
+        supabase_client.table("chat_messages").insert(message_record).execute()
+    except Exception as e:
+        await log_error_to_redis(redis_client, f"Chatwoot: falha ao salvar mensagem: {e}")
+
+
+async def _chatwoot_handle_conversation(payload, inbox_row, supabase_client, redis_client):
+    evt = payload.get("event")
+    if evt == "conversation_created":
+        current = payload.get("labels") or []
+        previous = []
+    else:
+        current, previous = _chatwoot_label_change(payload)
+        if current is None:
+            return
+    added = [lbl for lbl in current if lbl not in previous]
+    if added:
+        target_label = added[-1]
+    elif len(current) == 1:
+        target_label = current[0]
+    else:
+        return
+
+    meta = payload.get("meta") or {}
+    sender = meta.get("sender") or {}
+    contact_inbox = payload.get("contact_inbox")
+    chat_id = _chatwoot_chat_id(sender, contact_inbox)
+    if not chat_id:
+        return
+    lead_data = _find_existing_lead_for_inbox(supabase_client, inbox_row=inbox_row, chat_id=chat_id)
+    if not lead_data:
+        await log_error_to_redis(
+            redis_client, f"Chatwoot: etiqueta '{target_label}' sem lead correspondente ({chat_id})."
+        )
+        return
+
+    tenant_id = str(inbox_row["tenant_id"])
+    funnel_id = str(inbox_row["funnel_id"])
+    stage_name = ensure_stage_for_label(supabase_client, tenant_id=tenant_id, funnel_id=funnel_id, label=target_label)
+    current_stage = (lead_data.get("stage") or "").strip()
+    if stage_name and stage_name != current_stage:
+        try:
+            supabase_client.table("leads").update({"stage": stage_name}).eq("id", lead_data["id"]).execute()
+            await log_error_to_redis(
+                redis_client, f"Chatwoot: lead {lead_data['id']} movido {current_stage} -> {stage_name}"
+            )
+        except Exception as e:
+            await log_error_to_redis(redis_client, f"Chatwoot: falha ao mover lead: {e}")
+
+
+async def process_chatwoot_event(event, supabase_client, redis_client):
+    """Processa um evento do webhook do Chatwoot (message_created / conversation_updated)."""
+    payload = event.get("payload", {})
+    evt = payload.get("event")
+    account_id, cw_inbox_id = _chatwoot_ids(payload)
+    inbox_row = find_inbox_by_chatwoot(supabase_client, account_id, cw_inbox_id)
+    if not inbox_row:
+        await log_structured_webhook(
+            redis_client,
+            {
+                "event": "chatwoot_skip_no_inbox",
+                "account_id": account_id,
+                "chatwoot_inbox_id": cw_inbox_id,
+                "cw_event": evt,
+            },
+        )
+        return
+
+    cfg = inbox_row.get("chatwoot_settings") or {}
+    secret = cfg.get("webhook_secret") if isinstance(cfg, dict) else None
+    if secret and event.get("signature") and event.get("timestamp") and event.get("raw_body") is not None:
+        if not _verify_chatwoot_signature(secret, event["timestamp"], event["raw_body"], event["signature"]):
+            await log_error_to_redis(redis_client, "Chatwoot: assinatura HMAC invalida — evento ignorado.")
+            return
+
+    if evt == "message_created":
+        await _chatwoot_handle_message(payload, inbox_row, supabase_client, redis_client)
+    elif evt in ("conversation_updated", "conversation_created"):
+        await _chatwoot_handle_conversation(payload, inbox_row, supabase_client, redis_client)
+    else:
+        await log_error_to_redis(redis_client, f"Chatwoot: evento ignorado: {evt}")
+
+
 async def worker_loop():
     """Main worker loop — continuously reads from Redis queue."""
     settings = get_settings()
@@ -447,6 +672,8 @@ async def worker_loop():
 
             if source == "uazapi":
                 await process_uazapi_event(event, supabase_client, redis_client)
+            elif source == "chatwoot":
+                await process_chatwoot_event(event, supabase_client, redis_client)
             elif source == "invoice":
                 pass
             else:

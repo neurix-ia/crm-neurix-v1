@@ -243,3 +243,100 @@ def resolve_or_create_crm_client(
     except Exception:
         return None
     return None
+
+
+# =============================================================================
+# Chatwoot (provider oficial) — resolução de inbox e mapeamento etiqueta→etapa
+# =============================================================================
+
+def _chatwoot_ids(payload: dict) -> tuple[str, str]:
+    """Extrai (account_id, chatwoot_inbox_id) de qualquer evento Chatwoot."""
+    account_id = ""
+    inbox_id = ""
+    acc = payload.get("account")
+    if isinstance(acc, dict) and acc.get("id") is not None:
+        account_id = str(acc.get("id"))
+    inb = payload.get("inbox")
+    if isinstance(inb, dict) and inb.get("id") is not None:
+        inbox_id = str(inb.get("id"))
+    if not inbox_id and payload.get("inbox_id") is not None:
+        inbox_id = str(payload.get("inbox_id"))
+    conv = payload.get("conversation") if isinstance(payload.get("conversation"), dict) else None
+    if not inbox_id and conv and conv.get("inbox_id") is not None:
+        inbox_id = str(conv.get("inbox_id"))
+    if not account_id:
+        msgs = payload.get("messages")
+        if not msgs and conv:
+            msgs = conv.get("messages")
+        if isinstance(msgs, list) and msgs and msgs[0].get("account_id") is not None:
+            account_id = str(msgs[0].get("account_id"))
+    if not inbox_id:
+        ci = payload.get("contact_inbox") or (conv.get("contact_inbox") if conv else None)
+        if isinstance(ci, dict) and ci.get("inbox_id") is not None:
+            inbox_id = str(ci.get("inbox_id"))
+    return account_id, inbox_id
+
+
+def find_inbox_by_chatwoot(
+    supabase: SupabaseClient, account_id: str, chatwoot_inbox_id: str
+) -> Optional[dict[str, Any]]:
+    """Resolve a caixa do CRM por (account_id, inbox_id) gravados em chatwoot_settings."""
+    if not (account_id and chatwoot_inbox_id):
+        return None
+    try:
+        res = (
+            supabase.table("inboxes")
+            .select("id, tenant_id, funnel_id, name, provider, chatwoot_settings")
+            .eq("provider", "chatwoot")
+            .execute()
+        )
+        for row in res.data or []:
+            cfg = row.get("chatwoot_settings") or {}
+            if not isinstance(cfg, dict):
+                continue
+            if str(cfg.get("account_id")) == str(account_id) and str(cfg.get("inbox_id")) == str(chatwoot_inbox_id):
+                return row
+    except Exception:
+        return None
+    return None
+
+
+def ensure_stage_for_label(
+    supabase: SupabaseClient, *, tenant_id: str, funnel_id: str, label: str
+) -> str:
+    """Garante a etapa (coluna) correspondente à etiqueta; cria se faltar. Retorna o nome da etapa."""
+    label = (label or "").strip()
+    if not label:
+        return ""
+    try:
+        res = (
+            supabase.table("pipeline_stages")
+            .select("id, name, source_label, order_position")
+            .eq("tenant_id", tenant_id)
+            .eq("funnel_id", funnel_id)
+            .execute()
+        )
+        rows = res.data or []
+        max_pos = -1
+        for r in rows:
+            sl = (r.get("source_label") or "").strip()
+            nm = (r.get("name") or "").strip()
+            if sl == label or nm.casefold() == label.casefold():
+                return str(r.get("name") or label)
+            try:
+                max_pos = max(max_pos, int(r.get("order_position") or 0))
+            except Exception:
+                pass
+        new_stage = {
+            "tenant_id": tenant_id,
+            "funnel_id": funnel_id,
+            "name": label,
+            "source_label": label,
+            "order_position": max_pos + 1,
+        }
+        ins = supabase.table("pipeline_stages").insert(new_stage).execute()
+        if ins.data:
+            return str(ins.data[0].get("name") or label)
+    except Exception:
+        pass
+    return label
