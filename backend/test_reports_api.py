@@ -103,7 +103,7 @@ class ReportsApiTest(unittest.TestCase):
     def tearDown(self):
         _teardown()
 
-    @patch("app.routers.reports._resolve_kanban_scope", return_value=(FAKE_TENANT, "f1"))
+    @patch("app.routers.reports._resolve_report_tenant", return_value=FAKE_TENANT)
     def test_list_weekly_only_own_tenant(self, _m):
         client, supa = _make_client(SAMPLE)
         r = client.get("/api/reports/weekly")
@@ -113,21 +113,21 @@ class ReportsApiTest(unittest.TestCase):
         self.assertEqual(data[0]["problema_principal"], "Repetição de perguntas")
         self.assertEqual(supa.store["last_filters"].get("tenant_id"), FAKE_TENANT)
 
-    @patch("app.routers.reports._resolve_kanban_scope", return_value=(FAKE_TENANT, "f1"))
+    @patch("app.routers.reports._resolve_report_tenant", return_value=FAKE_TENANT)
     def test_get_weekly_found(self, _m):
         client, _ = _make_client(SAMPLE)
         r = client.get(f"/api/reports/weekly/{WK}")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["week_key"], WK)
 
-    @patch("app.routers.reports._resolve_kanban_scope", return_value=(FAKE_TENANT, "f1"))
+    @patch("app.routers.reports._resolve_report_tenant", return_value=FAKE_TENANT)
     def test_get_weekly_not_found(self, _m):
         client, _ = _make_client(SAMPLE)
         r = client.get("/api/reports/weekly/2099-W01")
         self.assertEqual(r.status_code, 404)
 
     @patch("app.routers.reports.read_week_rows")
-    @patch("app.routers.reports._resolve_kanban_scope", return_value=(FAKE_TENANT, "f1"))
+    @patch("app.routers.reports._resolve_report_tenant", return_value=FAKE_TENANT)
     def test_conversations_calls_reader(self, _scope, mock_reader):
         async def _fake_reader(supabase, redis, *, tenant_id, week_start, week_end):
             self.assertEqual(tenant_id, FAKE_TENANT)

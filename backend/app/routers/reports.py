@@ -1,6 +1,6 @@
 """Relatórios semanais — leitura do cliente (JWT).
 
-O cliente (papel read_only) enxerga só o próprio tenant, via _resolve_kanban_scope.
+O cliente (papel read_only) enxerga só o próprio tenant, via _resolve_report_tenant.
 "ver detalhes" lê as conversas da semana direto do Google Sheets (sob demanda).
 """
 from __future__ import annotations
@@ -10,10 +10,34 @@ from supabase import Client as SupabaseClient
 
 from app.authz import EffectiveRole, get_effective_role
 from app.dependencies import get_current_user, get_redis_optional, get_supabase
-from app.routers.leads import _resolve_kanban_scope
 from app.services.sheets_reader import read_week_rows, week_bounds_from_key
 
 router = APIRouter()
+
+
+def _resolve_report_tenant(supabase, user, eff) -> str:
+    """tenant_id dos dados do relatório — NÃO exige funil (o relatório vem da planilha).
+
+    - read_only: tenant dos dados = dono do funil atribuído.
+    - demais: o próprio usuário logado é o tenant.
+    """
+    uid = str(user.id)
+    if getattr(eff, "is_read_only", False):
+        fid = getattr(eff, "assigned_funnel_id", None)
+        if fid:
+            try:
+                r = (
+                    supabase.table("funnels")
+                    .select("tenant_id")
+                    .eq("id", fid)
+                    .limit(1)
+                    .execute()
+                )
+                if r.data:
+                    return str(r.data[0]["tenant_id"])
+            except Exception:
+                pass
+    return uid
 
 
 @router.get("/weekly")
@@ -23,7 +47,7 @@ async def list_weekly(
     eff: EffectiveRole = Depends(get_effective_role),
 ):
     """Semanas disponíveis para o tenant logado (navegação)."""
-    data_tenant, _funnel = _resolve_kanban_scope(supabase, str(user.id), eff, None)
+    data_tenant = _resolve_report_tenant(supabase, user, eff)
     res = (
         supabase.table("weekly_reports")
         .select("week_key, week_start, week_end, status, problema_principal")
@@ -42,7 +66,7 @@ async def get_weekly(
     eff: EffectiveRole = Depends(get_effective_role),
 ):
     """Relatório de uma semana específica do tenant."""
-    data_tenant, _funnel = _resolve_kanban_scope(supabase, str(user.id), eff, None)
+    data_tenant = _resolve_report_tenant(supabase, user, eff)
     res = (
         supabase.table("weekly_reports")
         .select("*")
@@ -69,7 +93,7 @@ async def get_weekly_conversations(
     redis=Depends(get_redis_optional),
 ):
     """'Ver detalhes': conversas daquela semana (somente leitura, lidas do Sheets)."""
-    data_tenant, _funnel = _resolve_kanban_scope(supabase, str(user.id), eff, None)
+    data_tenant = _resolve_report_tenant(supabase, user, eff)
     week_start, week_end = week_bounds_from_key(week_key)
     rows = await read_week_rows(
         supabase, redis, tenant_id=data_tenant, week_start=week_start, week_end=week_end
