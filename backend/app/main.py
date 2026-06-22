@@ -14,6 +14,7 @@ from app.dependencies import get_supabase
 from app.observability import metrics
 from app.routers import (
     admin_api,
+    admin_reports,
     auth,
     hq_n8n,
     hq_summary,
@@ -25,6 +26,7 @@ from app.routers import (
     inboxes,
     keyword_rules,
     leads,
+    n8n_reports,
     n8n_tools,
     n8n_webhook,
     orders,
@@ -32,6 +34,7 @@ from app.routers import (
     product_categories,
     products,
     promotions,
+    reports,
     settings as settings_router,
     upload,
     users,
@@ -110,10 +113,13 @@ def create_app() -> FastAPI:
     app.include_router(catalog_search.router, prefix="/api/catalog", tags=["Busca de Catálogo"])
     app.include_router(orders.router, prefix="/api/orders", tags=["Pedidos"])
     app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+    app.include_router(reports.router, prefix="/api/reports", tags=["Relatorios"])
+    app.include_router(admin_reports.router, prefix="/api/admin", tags=["Admin Relatorios"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["Configurações"])
     app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
     app.include_router(n8n_webhook.router, prefix="/api/n8n", tags=["N8n Integration"])
     app.include_router(n8n_tools.router, prefix="/api/n8n", tags=["N8n Integration"])
+    app.include_router(n8n_reports.router, prefix="/api/n8n", tags=["N8n Reports"])
     app.include_router(keyword_rules.router, prefix="/api/keyword-rules", tags=["Regras de Keywords"])
     app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
     app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])

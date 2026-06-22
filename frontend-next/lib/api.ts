@@ -135,7 +135,9 @@ async function redirectToLogin() {
         return;
     }
     await clearAuthSession();
-    window.location.href = "/login";
+    const back = window.location.pathname + window.location.search;
+    const q = back && back !== "/login" ? `?redirect=${encodeURIComponent(back)}` : "";
+    window.location.href = `/login${q}`;
 }
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -1019,5 +1021,91 @@ export type PipelineStageBrief = {
 export const listOrgFunnelStages = (orgId: string, funnelId: string, token?: string) =>
     apiGet<PipelineStageBrief[]>(
         `/api/organizations/${encodeURIComponent(orgId)}/funnels/${encodeURIComponent(funnelId)}/stages`,
+        token
+    );
+
+// ── Relatórios semanais (cliente) ──
+export type WeeklyMetrics = {
+    total_conversas?: number;
+    tempo_resp_ia_seg?: number;
+    tempo_resp_humano_min?: number;
+    horas_economizadas?: number;
+    nota_media_ia?: number;
+    nota_media_humano?: number;
+};
+
+export type WeeklyReportListItem = {
+    week_key: string;
+    week_start: string;
+    week_end: string;
+    status: string;
+    problema_principal: string;
+};
+
+export type WeeklyReportAcao = { acao: string; contexto?: string };
+
+export type WeeklyReport = {
+    id: string;
+    tenant_id: string;
+    week_key: string;
+    week_start: string;
+    week_end: string;
+    metrics: WeeklyMetrics;
+    problema_principal: string;
+    solucao_recomendada: string;
+    acoes: WeeklyReportAcao[];
+    status: string;
+    notified_at?: string | null;
+};
+
+export type WeeklyConversationsDTO = {
+    week_key: string;
+    total: number;
+    conversations: Array<Record<string, unknown>>;
+};
+
+export const listWeeklyReports = (token?: string) =>
+    apiGet<WeeklyReportListItem[]>("/api/reports/weekly", token);
+
+export const getWeeklyReport = (weekKey: string, token?: string) =>
+    apiGet<WeeklyReport>(`/api/reports/weekly/${encodeURIComponent(weekKey)}`, token);
+
+export const getWeeklyConversations = (weekKey: string, token?: string) =>
+    apiGet<WeeklyConversationsDTO>(
+        `/api/reports/weekly/${encodeURIComponent(weekKey)}/conversations`,
+        token
+    );
+
+// ── Relatórios de melhoria de agente (admin) ──
+export type AgentImprovementReport = {
+    id: string;
+    agent_key: string;
+    agent_name: string;
+    tenant_id?: string | null;
+    week_key: string;
+    week_start: string;
+    week_end: string;
+    severidade: string;
+    problema: string;
+    recomendacoes: string[];
+    status: string;
+};
+
+export const listAgentReports = (
+    opts?: { week_key?: string; severidade?: string; status?: string },
+    token?: string
+) => {
+    const qs = new URLSearchParams();
+    if (opts?.week_key) qs.set("week_key", opts.week_key);
+    if (opts?.severidade) qs.set("severidade", opts.severidade);
+    if (opts?.status) qs.set("status", opts.status);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<AgentImprovementReport[]>(`/api/admin/agent-reports${suffix}`, token);
+};
+
+export const patchAgentReport = (reportId: string, status: string, token?: string) =>
+    apiPatch<AgentImprovementReport>(
+        `/api/admin/agent-reports/${encodeURIComponent(reportId)}`,
+        { status },
         token
     );

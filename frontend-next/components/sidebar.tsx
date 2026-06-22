@@ -12,6 +12,7 @@ const navItems = [
     { href: "/kanban", icon: "view_kanban", label: "Funil de Vendas" },
     { href: "/clientes", icon: "person_search", label: "Clientes" },
     { href: "/produtos", icon: "inventory_2", label: "Produtos" },
+    { href: "/relatorios", icon: "summarize", label: "Relatórios" },
 ];
 
 const systemItems = [

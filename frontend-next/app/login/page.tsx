@@ -44,7 +44,11 @@ export default function LoginPage() {
             } catch {
                 /* fallback: app normal */
             }
-            router.push("/dashboard");
+            const redirect =
+                typeof window !== "undefined"
+                    ? new URLSearchParams(window.location.search).get("redirect")
+                    : null;
+            router.push(redirect && redirect.startsWith("/") ? redirect : "/dashboard");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Erro ao fazer login");
         } finally {

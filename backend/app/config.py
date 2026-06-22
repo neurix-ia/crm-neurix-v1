@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # ── Uazapi (WhatsApp) ──
     # URL pública do backend (sem barra final) — usada em POST /webhook na Uazapi e na doc do endpoint.
     PUBLIC_API_BASE_URL: str = "https://crm.wbtech.dev"
+    # URL pública do frontend (sem barra final) — usada em deep links de notificação (relatórios semanais).
+    PUBLIC_FRONTEND_URL: str = "https://crm-staging.wbtech.dev"
+    # Service account Google (JSON completo) — leitura read-only da planilha (relatorios).
+    GOOGLE_SA_JSON: str | None = None
     UAZAPI_URL: str = ""
     UAZAPI_ADMIN_TOKEN: str = ""  # For /instance/all and admin endpoints
     UAZAPI_INSTANCE_TOKEN: str = ""  # For /send/* endpoints (per-instance)
