@@ -10,7 +10,7 @@ from supabase import Client as SupabaseClient
 
 from app.authz import EffectiveRole, get_effective_role
 from app.dependencies import get_current_user, get_redis_optional, get_supabase
-from app.services.sheets_reader import read_week_rows, week_bounds_from_key
+from app.services.sheets_reader import parse_report_bounds, read_week_rows
 
 router = APIRouter()
 
@@ -94,7 +94,24 @@ async def get_weekly_conversations(
 ):
     """'Ver detalhes': conversas daquela semana (somente leitura, lidas do Sheets)."""
     data_tenant = _resolve_report_tenant(supabase, user, eff)
-    week_start, week_end = week_bounds_from_key(week_key)
+    res = (
+        supabase.table("weekly_reports")
+        .select("week_start, week_end")
+        .eq("tenant_id", data_tenant)
+        .eq("week_key", week_key)
+        .limit(1)
+        .execute()
+    )
+    report_rows = res.data or []
+    if not report_rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relatório não encontrado para esta semana.",
+        )
+    report = report_rows[0]
+    week_start, week_end = parse_report_bounds(
+        report["week_start"], report["week_end"]
+    )
     rows = await read_week_rows(
         supabase, redis, tenant_id=data_tenant, week_start=week_start, week_end=week_end
     )

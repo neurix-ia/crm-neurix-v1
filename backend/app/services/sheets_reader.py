@@ -27,6 +27,22 @@ def week_bounds_from_key(week_key: str, tz: str = "America/Sao_Paulo") -> tuple[
     return week_start, week_end
 
 
+def parse_report_bounds(
+    week_start: str, week_end: str, tz: str = "America/Sao_Paulo"
+) -> tuple[datetime, datetime]:
+    """week_start/week_end gravados no weekly_reports (mesma janela usada pelo n8n)."""
+    zone = ZoneInfo(tz)
+
+    def _parse(value: str) -> datetime:
+        raw = str(value).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=zone)
+        return dt
+
+    return _parse(week_start), _parse(week_end)
+
+
 def _load_sa_info(sa_json: str) -> dict:
     """Aceita o JSON cru (1 linha) OU base64 do JSON — base64 evita problemas de
     aspas/quebras de linha no env do docker-compose."""
