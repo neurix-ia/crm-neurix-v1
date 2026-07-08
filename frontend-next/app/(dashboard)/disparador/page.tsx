@@ -5,7 +5,9 @@ import {
     apiFetch,
     createDispatchCampaign,
     getDispatchCampaign,
+    getWhatsappStatus,
     listDispatchMembers,
+    saveWhatsappToken,
     type DispatchCampaignDetail,
     type DispatchMember,
 } from "@/lib/api";
@@ -25,6 +27,41 @@ export default function DisparadorPage() {
     const [campaign, setCampaign] = useState<DispatchCampaignDetail | null>(null);
     const [minDelay, setMinDelay] = useState(3);
     const [maxDelay, setMaxDelay] = useState(5);
+    const [uazapiToken, setUazapiToken] = useState("");
+    const [whatsappStatus, setWhatsappStatus] = useState<string>("—");
+    const [whatsappConfigured, setWhatsappConfigured] = useState(false);
+    const [savingToken, setSavingToken] = useState(false);
+    const [tokenInfo, setTokenInfo] = useState<string | null>(null);
+
+    const loadWhatsappStatus = useCallback(async () => {
+        if (!token) return;
+        try {
+            const res = await getWhatsappStatus(token);
+            setWhatsappStatus(res.status);
+            const noToken = (res.message || "").toLowerCase().includes("nenhum token");
+            setWhatsappConfigured(!noToken);
+        } catch {
+            setWhatsappStatus("desconhecido");
+            setWhatsappConfigured(false);
+        }
+    }, [token]);
+
+    const handleSaveUazapiToken = async () => {
+        if (!token || !uazapiToken.trim()) return;
+        setSavingToken(true);
+        setError(null);
+        setTokenInfo(null);
+        try {
+            await saveWhatsappToken(uazapiToken.trim(), token);
+            await loadWhatsappStatus();
+            setUazapiToken("");
+            setTokenInfo("Token UAZAPI salvo. Mesma configuração usada em Configurações > WhatsApp.");
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Erro ao salvar token UAZAPI.");
+        } finally {
+            setSavingToken(false);
+        }
+    };
 
     const loadMembers = useCallback(async () => {
         if (!token) return;
@@ -44,7 +81,8 @@ export default function DisparadorPage() {
 
     useEffect(() => {
         void loadMembers();
-    }, [loadMembers]);
+        void loadWhatsappStatus();
+    }, [loadMembers, loadWhatsappStatus]);
 
     const allSelected = members.length > 0 && selected.size === members.length;
 
@@ -140,6 +178,13 @@ export default function DisparadorPage() {
         }
     };
 
+    const whatsappStatusLabel = useMemo(() => {
+        if (whatsappStatus === "open" || whatsappStatus === "connected") return "Conectado";
+        if (whatsappStatus === "connecting") return "Conectando…";
+        if (whatsappStatus === "disconnected") return "Desconectado";
+        return whatsappStatus;
+    }, [whatsappStatus]);
+
     const progress = useMemo(() => {
         if (!campaign) return 0;
         if (!campaign.total) return 0;
@@ -168,6 +213,51 @@ export default function DisparadorPage() {
                     {importInfo}
                 </div>
             )}
+
+            {tokenInfo && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                    {tokenInfo}
+                </div>
+            )}
+
+            <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-semibold">WhatsApp (UAZAPI)</h2>
+                    <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            whatsappConfigured
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                        }`}
+                    >
+                        {whatsappConfigured ? whatsappStatusLabel : "Token não configurado"}
+                    </span>
+                </div>
+                <p className="mb-4 text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                    Cole o token da instância UAZAPI. Ao salvar, aplica o mesmo efeito de Configurações &gt;
+                    WhatsApp (webhook configurado automaticamente).
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <label className="flex-1 text-sm">
+                        Token da instância
+                        <input
+                            type="password"
+                            value={uazapiToken}
+                            onChange={(e) => setUazapiToken(e.target.value)}
+                            placeholder="Token ou identificador da instância"
+                            className="mt-1 w-full rounded-lg border border-border-light bg-white px-3 py-2 text-sm dark:border-border-dark dark:bg-slate-900"
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        onClick={() => void handleSaveUazapiToken()}
+                        disabled={savingToken || !uazapiToken.trim()}
+                        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                        {savingToken ? "Salvando..." : "Salvar token"}
+                    </button>
+                </div>
+            </section>
 
             <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
                 <h2 className="mb-3 font-semibold">Mensagem</h2>
