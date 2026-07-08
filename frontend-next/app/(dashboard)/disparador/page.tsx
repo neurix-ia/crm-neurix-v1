@@ -150,11 +150,11 @@ export default function DisparadorPage() {
         <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
             <div>
                 <h1 className="text-2xl font-bold text-text-main-light dark:text-text-main-dark">
-                    Disparador WhatsApp
+                    Comunicados
                 </h1>
                 <p className="mt-1 text-sm text-text-secondary-light dark:text-text-secondary-dark">
-                    Importe membros via CSV, selecione destinatários e dispare mensagens com intervalo
-                    aleatório.
+                    Importe membros via CSV, selecione destinatários e dispare mensagens WhatsApp com
+                    intervalo aleatório.
                 </p>
             </div>
 

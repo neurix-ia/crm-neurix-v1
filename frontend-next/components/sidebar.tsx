@@ -12,9 +12,17 @@ const navItems = [
     { href: "/kanban", icon: "view_kanban", label: "Funil de Vendas" },
     { href: "/clientes", icon: "person_search", label: "Clientes" },
     { href: "/produtos", icon: "inventory_2", label: "Produtos" },
-    { href: "/disparador", icon: "send", label: "Disparador" },
     { href: "/relatorios", icon: "summarize", label: "Relatórios" },
 ];
+
+/** Tenants com acesso ao disparador (menu Comunicados → /disparador). */
+const COMUNICADOS_MENU_EMAILS = new Set(["admin@bnielite.com"]);
+
+const comunicadosNavItem = {
+    href: "/disparador",
+    icon: "campaign",
+    label: "Comunicados",
+};
 
 const systemItems = [
     { href: "/configuracoes", icon: "settings", label: "Configurações" },
@@ -92,6 +100,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
     const panelTransform = mobileOpen ? "translate-x-0" : "max-md:-translate-x-full md:translate-x-0";
 
+    const showComunicados = COMUNICADOS_MENU_EMAILS.has(userEmail.trim().toLowerCase());
+    const visibleNavItems = showComunicados
+        ? [...navItems.slice(0, 4), comunicadosNavItem, ...navItems.slice(4)]
+        : navItems;
+
     return (
         <aside
             id="dashboard-nav"
@@ -121,7 +134,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
             {/* Navigation */}
             <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-1">
-                {navItems.map((item) => {
+                {visibleNavItems.map((item) => {
                     const isActive = pathname === item.href;
                     return (
                         <Link
