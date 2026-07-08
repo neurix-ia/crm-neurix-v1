@@ -1,0 +1,17 @@
+categoria;Produto;Preço;Peso;product_id;Cliente - Lojista
+Geleias;Geleia de amora;13,14;200g;fc44ddae-1c7d-429e-ae90-561cbfb9f657;Lojista
+Geleias;Geleia de morango;13,39;200g;63a7ad77-23ee-4464-959a-4100e297d45c;Lojista
+Geleias;Geleia de frutas vermelhas;14,23;200g;c30f9be6-bbac-487a-acc4-d4073562261d;Lojista
+Geleias;Geleia de figo;11,23;200g;08499c7e-ebf4-482f-8bba-874cb25dd519;Lojista
+Geleias;Geleia de abacaxi com pimenta;16,54;200g;7d455920-92a8-43e0-b0e6-abe5a262d3b4;Lojista
+Geleias Zero;Geleia de morango 0% açúcar;15,30;200g;6d4f0c91-71be-4038-80b4-d7f57fc978d2;Lojista
+Geleias Zero;Geleia de amora 0% açúcar;16,48;200g;fdf87d58-7c8d-4c75-bb51-07191753ae58;Lojista
+Geleias Zero;Geleia de framboesa 0% açúcar;19,75;200g;fad58f0b-ece2-477c-87fa-b7d31749e13e;Lojista
+Outros;Geleinhas;7,81;40g;4af1b90a-a5ad-4ad5-9355-0c04e799b444;Lojista
+Conservas e Patês;Bruschetta;14,34;190g;6fa52d25-66e2-4bf2-9d92-7d3a507d25d0;Lojista
+Conservas e Patês;Caponata de beringela;13,98;190g;f9474584-4844-4ab1-aa01-157cb2bdfd7b;Lojista
+Conservas e Patês;Patê de Palmito;14,25;180g;e234a96b-ccdd-49e0-841d-a9418aec7307;Lojista
+Conservas e Patês;Raiz forte de Crem;15,40;140g;21690b81-6910-486c-a17d-c7f13a8e46a7;Lojista
+Novidades;Manteiga de Palmito Veghee;16,98;180g;af08cb02-8142-450e-8f14-44828d87bd02;Lojista
+Novidades;Manteiga Veghee sem sal;16,94;200g;ee4e1f33-9975-49ac-9cda-a1da2889fc3e;Lojista
+Novidades;Manteiga Veghee com sal;16,94;200g;7edcd09f-850d-4f7c-8532-1793909263f6;Lojista
