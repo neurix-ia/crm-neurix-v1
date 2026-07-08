@@ -28,6 +28,8 @@ class Settings(BaseSettings):
             "N8N_APIKEY",
         ),
     )
+    # Webhook de produção do disparador CRM (n8n POST /webhook/disparador-crm-start)
+    N8N_DISPATCH_WEBHOOK_URL: str = "https://n8n-neurix-1.wbtech.dev/webhook/disparador-crm-start"
 
     # ── Neurix HQ (outbound n8n instances) ──
     # JSON array: [{"id":"neurix","label":"Neurix","base_url":"https://...","api_key":"..."}]

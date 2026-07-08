@@ -967,6 +967,60 @@ export const saveWhatsappToken = (instanceToken: string, token?: string, inboxId
 export const disconnectWhatsappInstance = (token?: string, inboxId?: string) =>
     apiDelete<{ message: string }>(`/api/whatsapp/disconnect${whatsappInboxQuery(inboxId)}`, token);
 
+// ── Disparador WhatsApp ──
+
+export type DispatchMember = {
+    id: string;
+    name: string;
+    phone: string;
+    phone_e164: string;
+    created_at?: string | null;
+};
+
+export type DispatchCampaign = {
+    id: string;
+    message: string;
+    status: string;
+    min_delay: number;
+    max_delay: number;
+    total: number;
+    sent: number;
+    failed: number;
+    created_at?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+};
+
+export type DispatchCampaignDetail = DispatchCampaign & {
+    targets: Array<{
+        id: string;
+        member_id?: string | null;
+        name: string;
+        phone_e164: string;
+        status: string;
+        error?: string | null;
+        sent_at?: string | null;
+    }>;
+};
+
+export const listDispatchMembers = (token?: string) =>
+    apiGet<DispatchMember[]>("/api/dispatch/members", token);
+
+export const createDispatchCampaign = (
+    body: {
+        message: string;
+        member_ids?: string[];
+        select_all?: boolean;
+        min_delay?: number;
+        max_delay?: number;
+        inbox_id?: string;
+    },
+    token?: string
+) => apiPost<DispatchCampaign>("/api/dispatch/campaigns", body, token);
+
+export const getDispatchCampaign = (campaignId: string, token?: string) =>
+    apiGet<DispatchCampaignDetail>(`/api/dispatch/campaigns/${encodeURIComponent(campaignId)}`, token);
+
 // ── Automação de etapa + auditoria (Sprint 11) ──
 
 export type StageAutomationDTO = {

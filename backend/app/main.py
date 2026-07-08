@@ -22,6 +22,7 @@ from app.routers import (
     chatwoot,
     clients,
     dashboard,
+    dispatch,
     funnels,
     inboxes,
     keyword_rules,
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(n8n_webhook.router, prefix="/api/n8n", tags=["N8n Integration"])
     app.include_router(n8n_tools.router, prefix="/api/n8n", tags=["N8n Integration"])
     app.include_router(n8n_reports.router, prefix="/api/n8n", tags=["N8n Reports"])
+    app.include_router(dispatch.router, prefix="/api/dispatch", tags=["Disparador"])
     app.include_router(keyword_rules.router, prefix="/api/keyword-rules", tags=["Regras de Keywords"])
     app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
     app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
