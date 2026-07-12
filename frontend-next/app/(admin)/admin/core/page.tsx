@@ -309,6 +309,106 @@ export default function NeurixHqPage() {
                 ) : null}
             </section>
 
+            {/* Ranking erros */}
+            <section>
+                <h2 className="text-lg font-bold font-display mb-3">Workflows com mais falhas</h2>
+                {loading && !errors ? (
+                    <p className="text-sm text-text-secondary-light">Carregando ranking…</p>
+                ) : errors && errors.rows.length === 0 ? (
+                    <p className="text-sm text-text-secondary-light">
+                        Nenhuma falha no período — ou configure N8N_INSTANCES no backend.
+                    </p>
+                ) : (
+                    <>
+                        {errors && errors.rows.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                                {errors.rows.slice(0, 3).map((row, idx) => (
+                                    <button
+                                        key={`top3-${row.instance_id}-${row.workflow_id ?? idx}`}
+                                        type="button"
+                                        onClick={() => setSelectedRow(row)}
+                                        className="glass-effect rounded-2xl border border-border-light dark:border-border-dark p-4 text-left hover:bg-primary/5 transition-colors cursor-pointer"
+                                    >
+                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary-light">
+                                                #{idx + 1}
+                                            </span>
+                                            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">
+                                                {row.instance_label}
+                                            </span>
+                                        </div>
+                                        <p className="font-semibold text-sm leading-snug line-clamp-2">{row.workflow_name}</p>
+                                        <p className="text-xl font-bold font-display text-red-600 dark:text-red-400 mt-2">
+                                            {row.failed_executions}{" "}
+                                            <span className="text-xs font-medium text-text-secondary-light">
+                                                falhas
+                                            </span>
+                                        </p>
+                                        <p className="text-xs text-text-secondary-light mt-2">
+                                            Última falha:{" "}
+                                            {row.last_failed_at
+                                                ? new Date(row.last_failed_at).toLocaleString("pt-BR")
+                                                : "—"}
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-border-light dark:border-border-dark text-left text-xs uppercase tracking-wide text-text-secondary-light">
+                                            <th className="px-4 py-3">#</th>
+                                            <th className="px-4 py-3">Workflow</th>
+                                            <th className="px-4 py-3">Pasta (cliente)</th>
+                                            <th className="px-4 py-3">Instância</th>
+                                            <th className="px-4 py-3 text-right">Falhas</th>
+                                            <th className="px-4 py-3">Última falha</th>
+                                            <th className="px-4 py-3 text-right">Run méd.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {errors?.rows.map((row, idx) => (
+                                            <tr
+                                                key={`${row.instance_id}-${row.workflow_id ?? idx}`}
+                                                onClick={() => setSelectedRow(row)}
+                                                className="border-b border-border-light/50 dark:border-border-dark/50 hover:bg-primary/5 cursor-pointer"
+                                            >
+                                                <td className="px-4 py-3 text-text-secondary-light">{idx + 1}</td>
+                                                <td className="px-4 py-3 font-medium">{row.workflow_name}</td>
+                                                <td className="px-4 py-3 text-text-secondary-light">
+                                                    {row.project_name || "—"}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                                                        {row.instance_label}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-semibold text-red-600 dark:text-red-400">
+                                                    {row.failed_executions}
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-text-secondary-light">
+                                                    {row.last_failed_at
+                                                        ? new Date(row.last_failed_at).toLocaleString("pt-BR")
+                                                        : "—"}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-text-secondary-light">
+                                                    {row.average_run_time_seconds.toFixed(2)}s
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </>
+                )}
+                <p className="text-xs text-text-secondary-light mt-2">
+                    Clique em um card ou linha para ver a causa do erro.
+                </p>
+            </section>
+
             {/* Agentes por cliente */}
             <section>
                 <h2 className="text-lg font-bold font-display mb-1">Agentes por cliente</h2>
@@ -323,70 +423,6 @@ export default function NeurixHqPage() {
                 ) : (
                     <N8nAgentsTree tree={agentsTree} />
                 )}
-            </section>
-
-            {/* Ranking erros */}
-            <section>
-                <h2 className="text-lg font-bold font-display mb-3">Workflows com mais falhas</h2>
-                {loading && !errors ? (
-                    <p className="text-sm text-text-secondary-light">Carregando ranking…</p>
-                ) : errors && errors.rows.length === 0 ? (
-                    <p className="text-sm text-text-secondary-light">
-                        Nenhuma falha no período — ou configure N8N_INSTANCES no backend.
-                    </p>
-                ) : (
-                    <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="border-b border-border-light dark:border-border-dark text-left text-xs uppercase tracking-wide text-text-secondary-light">
-                                        <th className="px-4 py-3">#</th>
-                                        <th className="px-4 py-3">Workflow</th>
-                                        <th className="px-4 py-3">Pasta (cliente)</th>
-                                        <th className="px-4 py-3">Instância</th>
-                                        <th className="px-4 py-3 text-right">Falhas</th>
-                                        <th className="px-4 py-3">Última falha</th>
-                                        <th className="px-4 py-3 text-right">Run méd.</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {errors?.rows.map((row, idx) => (
-                                        <tr
-                                            key={`${row.instance_id}-${row.workflow_id ?? idx}`}
-                                            onClick={() => setSelectedRow(row)}
-                                            className="border-b border-border-light/50 dark:border-border-dark/50 hover:bg-primary/5 cursor-pointer"
-                                        >
-                                            <td className="px-4 py-3 text-text-secondary-light">{idx + 1}</td>
-                                            <td className="px-4 py-3 font-medium">{row.workflow_name}</td>
-                                            <td className="px-4 py-3 text-text-secondary-light">
-                                                {row.project_name || "—"}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                                                    {row.instance_label}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-semibold text-red-600 dark:text-red-400">
-                                                {row.failed_executions}
-                                            </td>
-                                            <td className="px-4 py-3 text-xs text-text-secondary-light">
-                                                {row.last_failed_at
-                                                    ? new Date(row.last_failed_at).toLocaleString("pt-BR")
-                                                    : "—"}
-                                            </td>
-                                            <td className="px-4 py-3 text-right text-text-secondary-light">
-                                                {row.average_run_time_seconds.toFixed(2)}s
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                <p className="text-xs text-text-secondary-light mt-2">
-                    Clique em uma linha para ver a causa do erro.
-                </p>
             </section>
 
             {selectedRow && (
