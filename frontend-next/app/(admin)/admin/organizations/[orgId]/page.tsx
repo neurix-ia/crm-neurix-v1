@@ -6,15 +6,19 @@ import { useEffect, useState } from "react";
 
 import {
     addOrgMember,
+    getMenuCatalog,
     getOrganization,
     listOrgMembers,
     listOrganizationFunnels,
     removeOrgMember,
     updateOrgMember,
+    updateOrganization,
+    type MenuCatalogItemDTO,
     type OrganizationDTO,
     type OrganizationFunnelItem,
     type OrganizationMemberDTO,
 } from "@/lib/api";
+import { DEFAULT_MENU_CONFIG, resolveMenuConfig, type MenuItemKey } from "@/lib/menu-catalog";
 
 export default function AdminOrganizationDetailPage() {
     const params = useParams();
@@ -22,8 +26,12 @@ export default function AdminOrganizationDetailPage() {
     const [org, setOrg] = useState<OrganizationDTO | null>(null);
     const [members, setMembers] = useState<OrganizationMemberDTO[] | null>(null);
     const [orgFunnels, setOrgFunnels] = useState<OrganizationFunnelItem[]>([]);
+    const [catalog, setCatalog] = useState<MenuCatalogItemDTO[]>([]);
+    const [menuDraft, setMenuDraft] = useState<Record<MenuItemKey, boolean>>({ ...DEFAULT_MENU_CONFIG });
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [menuBusy, setMenuBusy] = useState(false);
+    const [menuSaved, setMenuSaved] = useState(false);
 
     const [addOpen, setAddOpen] = useState(false);
     const [newUserId, setNewUserId] = useState("");
@@ -42,9 +50,15 @@ export default function AdminOrganizationDetailPage() {
         setLoading(true);
         setError(null);
         try {
-            const [o, m] = await Promise.all([getOrganization(orgId, token), listOrgMembers(orgId, token)]);
+            const [o, m, cat] = await Promise.all([
+                getOrganization(orgId, token),
+                listOrgMembers(orgId, token),
+                getMenuCatalog(token).catch(() => []),
+            ]);
             setOrg(o);
             setMembers(m);
+            setCatalog(cat);
+            setMenuDraft(resolveMenuConfig(o.menu_config));
             try {
                 const f = await listOrganizationFunnels(orgId, token);
                 setOrgFunnels(f);
@@ -62,6 +76,46 @@ export default function AdminOrganizationDetailPage() {
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orgId]);
+
+    const toggleMenuItem = (key: MenuItemKey) => {
+        setMenuSaved(false);
+        setMenuDraft((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const saveMenu = async () => {
+        if (!token || !orgId) return;
+        setMenuBusy(true);
+        setError(null);
+        setMenuSaved(false);
+        try {
+            const updated = await updateOrganization(orgId, { menu_config: menuDraft }, token);
+            setOrg(updated);
+            setMenuDraft(resolveMenuConfig(updated.menu_config));
+            setMenuSaved(true);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao salvar menu.");
+        } finally {
+            setMenuBusy(false);
+        }
+    };
+
+    const restoreMenuDefaults = async () => {
+        if (!token || !orgId) return;
+        if (!confirm("Restaurar o menu padrão desta organização?")) return;
+        setMenuBusy(true);
+        setError(null);
+        setMenuSaved(false);
+        try {
+            const updated = await updateOrganization(orgId, { menu_config: { ...DEFAULT_MENU_CONFIG } }, token);
+            setOrg(updated);
+            setMenuDraft(resolveMenuConfig(updated.menu_config));
+            setMenuSaved(true);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao restaurar menu.");
+        } finally {
+            setMenuBusy(false);
+        }
+    };
 
     const submitAdd = async () => {
         if (!token || !newUserId.trim()) return;
@@ -140,6 +194,16 @@ export default function AdminOrganizationDetailPage() {
         }
     };
 
+    const catalogItems =
+        catalog.length > 0
+            ? catalog
+            : Object.keys(DEFAULT_MENU_CONFIG).map((key) => ({
+                  key,
+                  label: key,
+                  route: "",
+                  icon: "",
+              }));
+
     return (
         <div className="max-w-5xl space-y-6">
             <div className="flex flex-wrap items-center gap-4">
@@ -162,13 +226,71 @@ export default function AdminOrganizationDetailPage() {
                 </div>
             )}
 
+            {org && (
+                <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark p-6 space-y-4">
+                    <div>
+                        <h2 className="text-lg font-semibold">Menu lateral do app</h2>
+                        <p className="text-xs text-text-secondary-light mt-1">
+                            Define quais itens os membros desta organização veem no menu. Itens desabilitados também
+                            bloqueiam o acesso direto pela URL.
+                        </p>
+                    </div>
+                    <ul className="space-y-2">
+                        {catalogItems.map((item) => {
+                            const key = item.key as MenuItemKey;
+                            const checked = Boolean(menuDraft[key]);
+                            return (
+                                <li key={item.key}>
+                                    <label className="flex items-center gap-3 cursor-pointer rounded-xl px-3 py-2 hover:bg-black/5 dark:hover:bg-white/5">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 accent-primary"
+                                            checked={checked}
+                                            onChange={() => toggleMenuItem(key)}
+                                        />
+                                        <span className="text-sm font-medium flex-1">{item.label}</span>
+                                        {item.route ? (
+                                            <span className="text-xs font-mono text-text-secondary-light">{item.route}</span>
+                                        ) : null}
+                                    </label>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                    <div className="flex flex-wrap items-center gap-2 pt-2">
+                        <button
+                            type="button"
+                            disabled={menuBusy}
+                            onClick={saveMenu}
+                            className="h-10 px-4 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-60"
+                        >
+                            {menuBusy ? "Salvando…" : "Salvar menu"}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={menuBusy}
+                            onClick={restoreMenuDefaults}
+                            className="h-10 px-4 rounded-xl border border-border-light dark:border-border-dark text-sm"
+                        >
+                            Restaurar padrão
+                        </button>
+                        {menuSaved && (
+                            <span className="text-xs text-emerald-600 dark:text-emerald-400">Menu salvo.</span>
+                        )}
+                    </div>
+                </div>
+            )}
+
             <div>
                 <h2 className="text-lg font-semibold mb-2">Funis da organização</h2>
                 <p className="text-xs text-text-secondary-light mb-3">
-                    Funis cujo tenant é um membro <strong>admin</strong> (mesma regra que <code className="font-mono">org_scope</code> no backend).
+                    Funis cujo tenant é um membro <strong>admin</strong> (mesma regra que{" "}
+                    <code className="font-mono">org_scope</code> no backend).
                 </p>
                 {orgFunnels.length === 0 ? (
-                    <p className="text-sm text-text-secondary-light mb-6">Nenhum funil encontrado (adicione um admin com funil Default ou migração 008).</p>
+                    <p className="text-sm text-text-secondary-light mb-6">
+                        Nenhum funil encontrado (adicione um admin com funil Default ou migração 008).
+                    </p>
                 ) : (
                     <div className="glass-effect rounded-2xl border border-border-light dark:border-border-dark overflow-x-auto mb-8">
                         <table className="w-full text-sm min-w-[520px]">

@@ -1,11 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import Sidebar from "@/components/sidebar";
+import { getAuthMe } from "@/lib/api";
+import {
+    DEFAULT_MENU_CONFIG,
+    firstEnabledRoute,
+    isMenuRouteEnabled,
+    resolveMenuConfig,
+    type MenuConfig,
+} from "@/lib/menu-catalog";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
     const [mobileOpen, setMobileOpen] = useState(false);
+    const pathname = usePathname();
+    const router = useRouter();
+    const [menuConfig, setMenuConfig] = useState<MenuConfig | null>(null);
 
     const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -38,6 +50,26 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         onChange();
         return () => mq.removeEventListener("change", onChange);
     }, []);
+
+    useEffect(() => {
+        const token = localStorage.getItem("access_token");
+        if (!token) {
+            setMenuConfig(DEFAULT_MENU_CONFIG);
+            return;
+        }
+        getAuthMe(token)
+            .then((me) => setMenuConfig(resolveMenuConfig(me.menu_config)))
+            .catch(() => setMenuConfig(DEFAULT_MENU_CONFIG));
+    }, []);
+
+    useEffect(() => {
+        if (!menuConfig) return;
+        if (isMenuRouteEnabled(pathname, menuConfig)) return;
+        const target = firstEnabledRoute(menuConfig);
+        if (target !== pathname) {
+            router.replace(target);
+        }
+    }, [menuConfig, pathname, router]);
 
     return (
         <div className="flex h-screen overflow-hidden bg-background-light dark:bg-background-dark text-text-main-light dark:text-text-main-dark">

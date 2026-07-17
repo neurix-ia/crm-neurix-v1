@@ -17,6 +17,7 @@ from app.dependencies import (
 )
 from app.models.user import LoginRequest, OTPVerifyRequest, TokenResponse, RefreshRequest, UserProfile
 from app.authz import EffectiveRole, fetch_effective_role
+from app.menu_catalog import resolve_menu_config
 
 router = APIRouter()
 
@@ -157,6 +158,22 @@ async def get_me(
     oid = eff.effective_organization_id
     organization_id = str(oid) if oid is not None else None
 
+    menu_config = resolve_menu_config(None)
+    if organization_id:
+        try:
+            org_res = (
+                supabase.table("organizations")
+                .select("menu_config")
+                .eq("id", organization_id)
+                .limit(1)
+                .execute()
+            )
+            org_rows = org_res.data or []
+            if org_rows:
+                menu_config = resolve_menu_config(org_rows[0].get("menu_config"))
+        except Exception:
+            pass
+
     return UserProfile(
         id=str(user.id),
         email=user.email or "",
@@ -168,6 +185,7 @@ async def get_me(
         is_read_only=eff.is_read_only,
         assigned_funnel_id=eff.assigned_funnel_id,
         is_org_admin=eff.is_org_admin,
+        menu_config=menu_config,
     )
 
 

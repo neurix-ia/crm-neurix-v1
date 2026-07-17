@@ -39,3 +39,5 @@ class UserProfile(BaseModel):
     is_read_only: bool = False
     assigned_funnel_id: Optional[str] = None
     is_org_admin: bool = True
+    # Menu lateral resolvido (defaults mergeados) da organização efetiva.
+    menu_config: dict[str, bool] = Field(default_factory=dict)

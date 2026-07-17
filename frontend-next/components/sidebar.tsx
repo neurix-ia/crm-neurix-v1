@@ -6,27 +6,13 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import EditProfileModal from "@/components/EditProfileModal";
 import { getAuthMe } from "@/lib/api";
-
-const navItems = [
-    { href: "/dashboard", icon: "dashboard", label: "Painel" },
-    { href: "/kanban", icon: "view_kanban", label: "Funil de Vendas" },
-    { href: "/clientes", icon: "person_search", label: "Clientes" },
-    { href: "/produtos", icon: "inventory_2", label: "Produtos" },
-    { href: "/relatorios", icon: "summarize", label: "Relatórios" },
-];
-
-/** Tenants com acesso ao disparador (menu Comunicados → /disparador). */
-const COMUNICADOS_MENU_EMAILS = new Set(["admin@bnielite.com"]);
-
-const comunicadosNavItem = {
-    href: "/disparador",
-    icon: "campaign",
-    label: "Comunicados",
-};
-
-const systemItems = [
-    { href: "/configuracoes", icon: "settings", label: "Configurações" },
-];
+import {
+    DEFAULT_MENU_CONFIG,
+    firstEnabledRoute,
+    MENU_CATALOG,
+    resolveMenuConfig,
+    type MenuConfig,
+} from "@/lib/menu-catalog";
 
 type SidebarProps = {
     mobileOpen?: boolean;
@@ -40,11 +26,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     const [showEditProfileModal, setShowEditProfileModal] = useState(false);
     const profileRef = useRef<HTMLDivElement>(null);
 
-    // User state
     const [userName, setUserName] = useState("Carregando...");
     const [userEmail, setUserEmail] = useState("");
     const [userInitials, setUserInitials] = useState("--");
     const [isSuperadmin, setIsSuperadmin] = useState(false);
+    const [menuConfig, setMenuConfig] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
 
     useEffect(() => {
         async function fetchUser() {
@@ -73,15 +59,20 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         const token = localStorage.getItem("access_token");
         if (!token) return;
         getAuthMe(token)
-            .then((me) => setIsSuperadmin(Boolean(me.is_superadmin)))
-            .catch(() => setIsSuperadmin(false));
+            .then((me) => {
+                setIsSuperadmin(Boolean(me.is_superadmin));
+                setMenuConfig(resolveMenuConfig(me.menu_config));
+            })
+            .catch(() => {
+                setIsSuperadmin(false);
+                setMenuConfig(DEFAULT_MENU_CONFIG);
+            });
     }, []);
 
     useEffect(() => {
         onMobileClose?.();
     }, [pathname, onMobileClose]);
 
-    // Close popup when clicking outside
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
@@ -100,20 +91,19 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
     const panelTransform = mobileOpen ? "translate-x-0" : "max-md:-translate-x-full md:translate-x-0";
 
-    const showComunicados = COMUNICADOS_MENU_EMAILS.has(userEmail.trim().toLowerCase());
-    const visibleNavItems = showComunicados
-        ? [...navItems.slice(0, 4), comunicadosNavItem, ...navItems.slice(4)]
-        : navItems;
+    const resolved = resolveMenuConfig(menuConfig);
+    const mainItems = MENU_CATALOG.filter((item) => item.section === "main" && resolved[item.key]);
+    const systemItems = MENU_CATALOG.filter((item) => item.section === "system" && resolved[item.key]);
+    const homeHref = firstEnabledRoute(resolved);
 
     return (
         <aside
             id="dashboard-nav"
             className={`flex w-[280px] max-w-[min(280px,92vw)] flex-shrink-0 flex-col border-r border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark transition-[transform,colors] duration-200 ease-out md:static md:z-auto ${panelTransform} fixed inset-y-0 left-0 z-50 shadow-2xl md:shadow-none`}
         >
-            {/* Logo — clickable → /dashboard */}
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border-light px-6 dark:border-border-dark">
                 <Link
-                    href="/dashboard"
+                    href={homeHref}
                     onClick={() => onMobileClose?.()}
                     className="flex min-w-0 items-center gap-2 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30 -mx-2 px-2 py-1 rounded-lg"
                 >
@@ -132,22 +122,20 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 </button>
             </div>
 
-            {/* Navigation */}
             <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-1">
-                {visibleNavItems.map((item) => {
-                    const isActive = pathname === item.href;
+                {mainItems.map((item) => {
+                    const isActive = pathname === item.route || pathname.startsWith(item.route + "/");
                     return (
                         <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${isActive
-                                ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
-                                : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
-                                }`}
+                            key={item.key}
+                            href={item.route}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                                isActive
+                                    ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
+                                    : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
+                            }`}
                         >
-                            <span
-                                className={`material-symbols-outlined ${isActive ? "filled" : ""}`}
-                            >
+                            <span className={`material-symbols-outlined ${isActive ? "filled" : ""}`}>
                                 {item.icon}
                             </span>
                             <span className="text-sm">{item.label}</span>
@@ -155,27 +143,27 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                     );
                 })}
 
-                {/* Separator */}
-                <div className="pt-4 mt-4 border-t border-border-light dark:border-border-dark">
-                    <span className="px-3 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark uppercase tracking-wider">
-                        Sistema
-                    </span>
-                </div>
+                {(systemItems.length > 0 || isSuperadmin) && (
+                    <div className="pt-4 mt-4 border-t border-border-light dark:border-border-dark">
+                        <span className="px-3 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark uppercase tracking-wider">
+                            Sistema
+                        </span>
+                    </div>
+                )}
 
                 {systemItems.map((item) => {
-                    const isActive = pathname === item.href;
+                    const isActive = pathname === item.route || pathname.startsWith(item.route + "/");
                     return (
                         <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`flex items-center gap-3 px-3 py-2.5 mt-2 rounded-xl transition-colors ${isActive
-                                ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
-                                : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
-                                }`}
+                            key={item.key}
+                            href={item.route}
+                            className={`flex items-center gap-3 px-3 py-2.5 mt-2 rounded-xl transition-colors ${
+                                isActive
+                                    ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
+                                    : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
+                            }`}
                         >
-                            <span
-                                className={`material-symbols-outlined ${isActive ? "filled" : ""}`}
-                            >
+                            <span className={`material-symbols-outlined ${isActive ? "filled" : ""}`}>
                                 {item.icon}
                             </span>
                             <span className="text-sm">{item.label}</span>
@@ -184,39 +172,47 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 })}
                 {isSuperadmin && (
                     <>
-                    <Link
-                        href="/admin/core"
-                        className={`flex items-center gap-3 px-3 py-2.5 mt-2 rounded-xl transition-colors ${
-                            pathname.startsWith("/admin/core")
-                                ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
-                                : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
-                        }`}
-                    >
-                        <span className={`material-symbols-outlined ${pathname.startsWith("/admin/core") ? "filled" : ""}`}>
-                            dashboard
-                        </span>
-                        <span className="text-sm">Neurix HQ</span>
-                    </Link>
-                    <Link
-                        href="/admin"
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
-                            pathname.startsWith("/admin") && !pathname.startsWith("/admin/core")
-                                ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
-                                : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
-                        }`}
-                    >
-                        <span className={`material-symbols-outlined ${pathname.startsWith("/admin") && !pathname.startsWith("/admin/core") ? "filled" : ""}`}>
-                            admin_panel_settings
-                        </span>
-                        <span className="text-sm">Console Admin</span>
-                    </Link>
+                        <Link
+                            href="/admin/core"
+                            className={`flex items-center gap-3 px-3 py-2.5 mt-2 rounded-xl transition-colors ${
+                                pathname.startsWith("/admin/core")
+                                    ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
+                                    : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
+                            }`}
+                        >
+                            <span
+                                className={`material-symbols-outlined ${
+                                    pathname.startsWith("/admin/core") ? "filled" : ""
+                                }`}
+                            >
+                                dashboard
+                            </span>
+                            <span className="text-sm">Neurix HQ</span>
+                        </Link>
+                        <Link
+                            href="/admin"
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                                pathname.startsWith("/admin") && !pathname.startsWith("/admin/core")
+                                    ? "bg-primary-light dark:bg-primary/20 text-primary font-medium"
+                                    : "text-text-secondary-light dark:text-text-secondary-dark hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-primary"
+                            }`}
+                        >
+                            <span
+                                className={`material-symbols-outlined ${
+                                    pathname.startsWith("/admin") && !pathname.startsWith("/admin/core")
+                                        ? "filled"
+                                        : ""
+                                }`}
+                            >
+                                admin_panel_settings
+                            </span>
+                            <span className="text-sm">Console Admin</span>
+                        </Link>
                     </>
                 )}
             </nav>
 
-            {/* User Profile */}
             <div className="p-4 border-t border-border-light dark:border-border-dark relative" ref={profileRef}>
-                {/* Profile popup */}
                 {showProfile && (
                     <div className="absolute bottom-full left-3 right-3 mb-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl border border-border-light dark:border-border-dark p-4 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
                         <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border-light dark:border-border-dark">
@@ -282,7 +278,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 </div>
             </div>
 
-            {/* Edit Profile Modal */}
             {showEditProfileModal && (
                 <EditProfileModal onClose={() => setShowEditProfileModal(false)} />
             )}

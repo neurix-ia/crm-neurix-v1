@@ -385,6 +385,8 @@ export type AuthMe = {
     is_read_only?: boolean;
     assigned_funnel_id?: string | null;
     is_org_admin?: boolean;
+    /** Menu lateral resolvido (defaults mergeados) da organização. */
+    menu_config?: Record<string, boolean>;
 };
 
 export const getAuthMe = (token?: string) => apiGet<AuthMe>("/api/auth/me", token);
@@ -576,8 +578,16 @@ export const getHqN8nExecutionError = (
 export type OrganizationDTO = {
     id: string;
     name: string;
+    menu_config?: Record<string, boolean>;
     created_at: string;
     updated_at: string;
+};
+
+export type MenuCatalogItemDTO = {
+    key: string;
+    label: string;
+    route: string;
+    icon: string;
 };
 
 export type OrganizationMemberDTO = {
@@ -595,14 +605,20 @@ export const getOrganizations = (token?: string) =>
 export const createOrganization = (body: { name: string }, token?: string) =>
     apiPost<OrganizationDTO>("/api/organizations/", body, token);
 
-export const updateOrganization = (orgId: string, body: { name: string }, token?: string) =>
-    apiPatch<OrganizationDTO>(`/api/organizations/${orgId}`, body, token);
+export const updateOrganization = (
+    orgId: string,
+    body: { name?: string; menu_config?: Record<string, boolean> },
+    token?: string
+) => apiPatch<OrganizationDTO>(`/api/organizations/${orgId}`, body, token);
 
 export const deleteOrganization = (orgId: string, token?: string) =>
     apiDelete<void>(`/api/organizations/${orgId}`, token);
 
 export const getOrganization = (orgId: string, token?: string) =>
     apiGet<OrganizationDTO>(`/api/organizations/${orgId}`, token);
+
+export const getMenuCatalog = (token?: string) =>
+    apiGet<MenuCatalogItemDTO[]>("/api/organizations/menu-catalog", token);
 
 export const listOrgMembers = (orgId: string, token?: string) =>
     apiGet<OrganizationMemberDTO[]>(`/api/organizations/${orgId}/members`, token);

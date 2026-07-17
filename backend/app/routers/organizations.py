@@ -22,7 +22,13 @@ from app.authz import EffectiveRole, get_effective_role
 from app.dependencies import get_current_user, get_supabase, require_superadmin
 from app.observability import get_logger
 from app.org_scope import assert_funnel_assignable_to_org, funnel_ids_for_organization, list_funnels_for_organization
+from app.menu_catalog import (
+    MENU_CATALOG,
+    resolve_menu_config,
+    sanitize_menu_config_input,
+)
 from app.models.organization import (
+    MenuCatalogItem,
     OrganizationCreate,
     OrganizationFunnelItem,
     OrganizationMemberCreate,
@@ -31,6 +37,8 @@ from app.models.organization import (
     OrganizationResponse,
     OrganizationUpdate,
 )
+
+ORG_SELECT = "id, name, menu_config, created_at, updated_at"
 
 router = APIRouter()
 logger = get_logger("organizations")
@@ -91,6 +99,7 @@ def _org_row_to_response(row: dict[str, Any]) -> OrganizationResponse:
     return OrganizationResponse(
         id=str(row["id"]),
         name=row["name"],
+        menu_config=resolve_menu_config(row.get("menu_config")),
         created_at=_parse_ts(row.get("created_at")),
         updated_at=_parse_ts(row.get("updated_at")),
     )
@@ -145,7 +154,7 @@ async def create_organization(
         try:
             refetch = (
                 supabase.table("organizations")
-                .select("id, name, created_at, updated_at")
+                .select(ORG_SELECT)
                 .eq("id", org_id)
                 .limit(1)
                 .execute()
@@ -172,6 +181,14 @@ async def create_organization(
     return _org_row_to_response(rows[0])
 
 
+@router.get("/menu-catalog", response_model=list[MenuCatalogItem])
+async def get_menu_catalog(
+    _user=Depends(get_current_user),
+):
+    """Catálogo de itens do menu lateral (para UI do Console Admin)."""
+    return [MenuCatalogItem(**item) for item in MENU_CATALOG]
+
+
 @router.get("/", response_model=list[OrganizationResponse])
 async def list_organizations(
     user=Depends(get_current_user),
@@ -183,7 +200,7 @@ async def list_organizations(
     if _is_superadmin(eff):
         res = (
             supabase.table("organizations")
-            .select("id, name, created_at, updated_at")
+            .select(ORG_SELECT)
             .order("name")
             .execute()
         )
@@ -202,7 +219,7 @@ async def list_organizations(
 
     res = (
         supabase.table("organizations")
-        .select("id, name, created_at, updated_at")
+        .select(ORG_SELECT)
         .in_("id", org_ids)
         .order("name")
         .execute()
@@ -225,7 +242,7 @@ async def get_organization(
 
     res = (
         supabase.table("organizations")
-        .select("id, name, created_at, updated_at")
+        .select(ORG_SELECT)
         .eq("id", org_id)
         .limit(1)
         .execute()
@@ -252,14 +269,54 @@ async def update_organization(
             detail="Sem permissão para alterar esta organização.",
         )
 
+    if payload.menu_config is not None and not _is_superadmin(eff):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Somente superadmin pode alterar o menu lateral.",
+        )
+
     now = datetime.now(timezone.utc).isoformat()
+    update_payload: dict[str, Any] = {"updated_at": now}
+
+    if payload.name is not None:
+        update_payload["name"] = payload.name.strip()
+
+    if payload.menu_config is not None:
+        try:
+            sanitized = sanitize_menu_config_input(payload.menu_config)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        current = (
+            supabase.table("organizations")
+            .select("menu_config")
+            .eq("id", org_id)
+            .limit(1)
+            .execute()
+        )
+        current_rows = current.data or []
+        if not current_rows:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organização não encontrada.")
+        base = resolve_menu_config(current_rows[0].get("menu_config"))
+        base.update(sanitized)
+        update_payload["menu_config"] = base
+
     upd = (
         supabase.table("organizations")
-        .update({"name": payload.name.strip(), "updated_at": now})
+        .update(update_payload)
         .eq("id", org_id)
         .execute()
     )
     rows = upd.data or []
+    if not rows:
+        # update pode não retornar row se select implícito falhar — refetch
+        refetch = (
+            supabase.table("organizations")
+            .select(ORG_SELECT)
+            .eq("id", org_id)
+            .limit(1)
+            .execute()
+        )
+        rows = refetch.data or []
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organização não encontrada.")
     return _org_row_to_response(rows[0])

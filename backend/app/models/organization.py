@@ -15,14 +15,29 @@ class OrganizationCreate(BaseModel):
 
 
 class OrganizationUpdate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=500)
+    name: Optional[str] = Field(None, min_length=1, max_length=500)
+    menu_config: Optional[dict[str, bool]] = None
+
+    @model_validator(mode="after")
+    def at_least_one_field(self):
+        if self.name is None and self.menu_config is None:
+            raise ValueError("Informe name e/ou menu_config.")
+        return self
 
 
 class OrganizationResponse(BaseModel):
     id: str
     name: str
+    menu_config: dict[str, bool] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class MenuCatalogItem(BaseModel):
+    key: str
+    label: str
+    route: str
+    icon: str
 
 
 class OrganizationMemberCreate(BaseModel):
