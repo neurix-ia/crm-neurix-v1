@@ -215,8 +215,8 @@ async def n8n_tool_dispatch_targets(
     return {
         "campaign_id": campaign_id,
         "message": campaign.get("message") or "",
-        "min_delay": campaign.get("min_delay") or 15,
-        "max_delay": campaign.get("max_delay") or 21,
+        "min_delay": campaign.get("min_delay") or 180,
+        "max_delay": campaign.get("max_delay") or 540,
         "instance_token": campaign.get("instance_token"),
         "targets": targets,
     }

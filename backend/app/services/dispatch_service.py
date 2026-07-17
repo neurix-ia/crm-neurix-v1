@@ -18,8 +18,9 @@ from app.services.phone_normalize import digits_only
 logger = logging.getLogger(__name__)
 
 UAZAPI_TOKEN_KEY = "instance_token"
-DEFAULT_MIN_DELAY = 15
-DEFAULT_MAX_DELAY = 21
+# Delay entre envios em segundos (UI do Comunicados usa minutos: 3–9 → 180–540).
+DEFAULT_MIN_DELAY = 180
+DEFAULT_MAX_DELAY = 540
 
 
 def normalize_phone_e164(raw: str) -> Optional[str]:
@@ -103,7 +104,7 @@ def resolve_instance_token(
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nenhum token UAZAPI configurado nesta caixa.",
+                detail="Nenhum token WhatsApp configurado nesta caixa.",
             )
         return token
 
@@ -122,7 +123,7 @@ def resolve_instance_token(
                 return token
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nenhum token UAZAPI configurado. Configure em Configurações > WhatsApp.",
+            detail="Nenhum token WhatsApp configurado. Configure em Configurações > WhatsApp.",
         )
     return token
 

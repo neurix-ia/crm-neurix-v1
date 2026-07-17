@@ -44,8 +44,8 @@ class CreateCampaignRequest(BaseModel):
     member_ids: Optional[list[str]] = None
     select_all: bool = False
     inbox_id: Optional[str] = None
-    min_delay: int = Field(default=DEFAULT_MIN_DELAY, ge=1, le=300)
-    max_delay: int = Field(default=DEFAULT_MAX_DELAY, ge=1, le=600)
+    min_delay: int = Field(default=DEFAULT_MIN_DELAY, ge=1, le=3600)
+    max_delay: int = Field(default=DEFAULT_MAX_DELAY, ge=1, le=7200)
 
 
 class CampaignOut(BaseModel):
