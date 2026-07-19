@@ -75,7 +75,7 @@ function FolderRow({ folder }: { folder: N8nClientFolderNode }) {
                                 title={wf.active ? "Ativo" : "Inativo"}
                             />
                             {wf.is_agent && (
-                                <span className="text-[10px] uppercase tracking-wide font-semibold text-violet-600 dark:text-violet-400 shrink-0">
+                                <span className="text-[10px] uppercase tracking-wide font-semibold text-primary shrink-0">
                                     Agente
                                 </span>
                             )}

@@ -226,15 +226,14 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
             <div className="bg-white dark:bg-[#111B21] w-full max-w-2xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative border border-primary/20 dark:border-primary/30 ring-1 ring-primary/10">
 
                 {/* Header — gradient with CRM primary */}
-                <div className="px-4 py-3 flex items-center justify-between border-b border-primary/10 dark:border-primary/20"
-                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                <div className="px-4 py-3 flex items-center justify-between border-b border-primary/10 dark:border-primary/20 bg-primary">
                     <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30 overflow-hidden shrink-0">
                             <span className="material-symbols-outlined text-white text-xl">person</span>
                         </div>
                         <div>
                             <h3 className="font-bold text-white leading-tight truncate max-w-[300px]">{leadName}</h3>
-                            <p className="text-xs text-purple-200 flex items-center gap-1">
+                            <p className="text-xs text-rose-100 flex items-center gap-1">
                                 <span className="w-2 h-2 bg-green-400 rounded-full inline-block animate-pulse"></span>
                                 {loading ? "Conectando..." : messages.length > 0 ? `${messages.length} mensagens` : "Online"}
                             </p>
@@ -256,13 +255,13 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
                 {/* Chat Area */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 relative"
                     style={{
-                        background: 'linear-gradient(180deg, #f8f5ff 0%, #f1f5f9 100%)',
+                        background: 'linear-gradient(180deg, #fff1f2 0%, #f1f5f9 100%)',
                     }}>
 
                     {/* Subtle pattern overlay */}
                     <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
                         style={{
-                            backgroundImage: `radial-gradient(circle, #8b5cf6 1px, transparent 1px)`,
+                            backgroundImage: `radial-gradient(circle, #E11D48 1px, transparent 1px)`,
                             backgroundSize: '24px 24px',
                         }} />
 
@@ -283,7 +282,7 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
                         </div>
                     ) : messages.length === 0 ? (
                         <div className="flex justify-center py-10 relative z-10">
-                            <div className="bg-gradient-to-r from-primary/5 to-purple-50 border border-primary/15 text-[#54656F] px-6 py-4 rounded-2xl shadow-sm text-center max-w-sm">
+                            <div className="bg-gradient-to-r from-primary/5 to-rose-50 border border-primary/15 text-[#54656F] px-6 py-4 rounded-2xl shadow-sm text-center max-w-sm">
                                 <span className="material-symbols-outlined text-3xl text-primary/40 block mb-2">forum</span>
                                 <p className="text-sm font-medium">Nenhuma mensagem encontrada</p>
                                 <p className="text-xs text-text-secondary-light mt-1">As mensagens do WhatsApp aparecerão aqui</p>
@@ -296,7 +295,7 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
                             return (
                                 <div key={msg.id || i} className={`flex ${me ? "justify-end" : "justify-start"} relative z-10`}>
                                     <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm relative transition-all hover:shadow-md ${me
-                                            ? "bg-gradient-to-br from-primary/90 to-purple-700/90 text-white rounded-br-sm"
+                                            ? "bg-primary text-white rounded-br-sm"
                                             : "bg-white dark:bg-[#202C33] text-[#111B21] dark:text-[#E9EDEF] rounded-bl-sm border border-slate-100 dark:border-transparent"
                                         }`}>
                                         {!me && msg.pushName && (
@@ -359,7 +358,7 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
                                 <button type="button"
                                     onClick={() => { fileInputRef.current?.setAttribute('accept', '*/*'); fileInputRef.current?.click(); }}
                                     className="w-full px-4 py-2.5 text-sm hover:bg-primary/5 dark:hover:bg-[#374045] flex items-center gap-3 transition-colors">
-                                    <span className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center">
+                                    <span className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
                                         <span className="material-symbols-outlined text-white text-base">description</span>
                                     </span>
                                     <span>Documentos</span>
@@ -407,7 +406,7 @@ export default function WhatsAppChat({ leadId, leadName, onClose }: WhatsAppChat
                         <button
                             type="submit"
                             disabled={sending || uploadingFile}
-                            className="w-11 h-11 mb-0.5 bg-gradient-to-r from-primary to-purple-700 hover:from-primary/90 hover:to-purple-600 text-white rounded-full flex items-center justify-center shrink-0 transition-all shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 disabled:opacity-50 active:scale-95"
+                            className="w-11 h-11 mb-0.5 bg-primary hover:bg-primary-hover text-white rounded-full flex items-center justify-center shrink-0 transition-all shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 disabled:opacity-50 active:scale-95"
                         >
                             <span className="material-symbols-outlined text-[20px]">{sending ? "hourglass_empty" : "send"}</span>
                         </button>

@@ -4,13 +4,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     apiFetch,
     createDispatchCampaign,
+    deleteDispatchMember,
+    deleteDispatchMembers,
     getDispatchCampaign,
     getWhatsappStatus,
+    listDispatchCampaigns,
     listDispatchMembers,
     saveWhatsappToken,
+    type DispatchCampaign,
     type DispatchCampaignDetail,
     type DispatchMember,
 } from "@/lib/api";
+
+function formatCampaignDate(iso?: string | null) {
+    if (!iso) return "—";
+    try {
+        return new Date(iso).toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    } catch {
+        return iso;
+    }
+}
 
 export default function DisparadorPage() {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
@@ -22,9 +40,12 @@ export default function DisparadorPage() {
     const [loading, setLoading] = useState(true);
     const [importing, setImporting] = useState(false);
     const [dispatching, setDispatching] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [importInfo, setImportInfo] = useState<string | null>(null);
     const [campaign, setCampaign] = useState<DispatchCampaignDetail | null>(null);
+    const [recentCampaigns, setRecentCampaigns] = useState<DispatchCampaign[]>([]);
+    const [confirmOpen, setConfirmOpen] = useState(false);
     /** Delay entre envios, em minutos (enviado à API como segundos). */
     const [minDelayMin, setMinDelayMin] = useState(3);
     const [maxDelayMin, setMaxDelayMin] = useState(9);
@@ -44,6 +65,18 @@ export default function DisparadorPage() {
         } catch {
             setWhatsappStatus("desconhecido");
             setWhatsappConfigured(false);
+        }
+    }, [token]);
+
+    const loadCampaigns = useCallback(async () => {
+        if (!token) return;
+        try {
+            const list = await listDispatchCampaigns(10, token);
+            setRecentCampaigns(list);
+            return list;
+        } catch {
+            setRecentCampaigns([]);
+            return [] as DispatchCampaign[];
         }
     }, [token]);
 
@@ -80,10 +113,32 @@ export default function DisparadorPage() {
         }
     }, [token]);
 
+    const pollCampaign = useCallback(
+        async (campaignId: string) => {
+            if (!token) return;
+            const detail = await getDispatchCampaign(campaignId, token);
+            setCampaign(detail);
+            if (detail.status === "running") {
+                setTimeout(() => void pollCampaign(campaignId), 2000);
+            } else {
+                void loadCampaigns();
+            }
+        },
+        [token, loadCampaigns]
+    );
+
     useEffect(() => {
         void loadMembers();
         void loadWhatsappStatus();
-    }, [loadMembers, loadWhatsappStatus]);
+        void (async () => {
+            const list = await loadCampaigns();
+            const running = list.find((c) => c.status === "running");
+            if (running) {
+                void pollCampaign(running.id);
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [loadMembers, loadWhatsappStatus, loadCampaigns]);
 
     const allSelected = members.length > 0 && selected.size === members.length;
 
@@ -103,6 +158,16 @@ export default function DisparadorPage() {
             return next;
         });
     };
+
+    const previewName = useMemo(() => {
+        const firstSelected = members.find((m) => selected.has(m.id));
+        return firstSelected?.name || members[0]?.name || "nome";
+    }, [members, selected]);
+
+    const messagePreview = useMemo(() => {
+        const raw = message.trim() || "Olá {{nome}}, temos novidades para você!";
+        return raw.replace(/\{\{\s*nome\s*\}\}/gi, previewName);
+    }, [message, previewName]);
 
     const handleImport = async (file: File | null) => {
         if (!file || !token) return;
@@ -137,20 +202,61 @@ export default function DisparadorPage() {
         }
     };
 
-    const pollCampaign = useCallback(
-        async (campaignId: string) => {
-            if (!token) return;
-            const detail = await getDispatchCampaign(campaignId, token);
-            setCampaign(detail);
-            if (detail.status === "running") {
-                setTimeout(() => void pollCampaign(campaignId), 2000);
-            }
-        },
-        [token]
-    );
+    const handleClearList = async () => {
+        if (!token || members.length === 0) return;
+        if (!confirm(`Excluir toda a lista (${members.length} membros)? Esta ação não pode ser desfeita.`)) {
+            return;
+        }
+        setDeleting(true);
+        setError(null);
+        try {
+            await deleteDispatchMembers({ all: true }, token);
+            setImportInfo("Lista excluída.");
+            await loadMembers();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao excluir lista.");
+        } finally {
+            setDeleting(false);
+        }
+    };
 
-    const handleDispatch = async () => {
+    const handleDeleteSelected = async () => {
+        if (!token || selected.size === 0) return;
+        if (selected.size === members.length) {
+            await handleClearList();
+            return;
+        }
+        if (!confirm(`Excluir ${selected.size} membro(s) selecionado(s)?`)) return;
+        setDeleting(true);
+        setError(null);
+        try {
+            await deleteDispatchMembers({ member_ids: Array.from(selected) }, token);
+            setImportInfo(`${selected.size} membro(s) excluído(s).`);
+            await loadMembers();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao excluir selecionados.");
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const handleDeleteOne = async (m: DispatchMember) => {
         if (!token) return;
+        if (!confirm(`Excluir ${m.name}?`)) return;
+        setDeleting(true);
+        setError(null);
+        try {
+            await deleteDispatchMember(m.id, token);
+            await loadMembers();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao excluir membro.");
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const openConfirmDispatch = () => {
+        setError(null);
         if (!message.trim()) {
             setError("Informe a mensagem.");
             return;
@@ -163,6 +269,12 @@ export default function DisparadorPage() {
             setError("Delay inválido: mínimo e máximo devem ser em minutos, com mín ≤ máx.");
             return;
         }
+        setConfirmOpen(true);
+    };
+
+    const handleDispatch = async () => {
+        if (!token) return;
+        setConfirmOpen(false);
         setDispatching(true);
         setError(null);
         try {
@@ -175,11 +287,27 @@ export default function DisparadorPage() {
                 },
                 token
             );
+            await loadCampaigns();
             await pollCampaign(created.id);
         } catch (e) {
             setError(e instanceof Error ? e.message : "Falha ao disparar.");
         } finally {
             setDispatching(false);
+        }
+    };
+
+    const openCampaignDetail = async (c: DispatchCampaign) => {
+        if (!token) return;
+        setError(null);
+        try {
+            if (c.status === "running") {
+                await pollCampaign(c.id);
+            } else {
+                const detail = await getDispatchCampaign(c.id, token);
+                setCampaign(detail);
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Falha ao carregar campanha.");
         }
     };
 
@@ -195,6 +323,8 @@ export default function DisparadorPage() {
         if (!campaign.total) return 0;
         return Math.round(((campaign.sent + campaign.failed) / campaign.total) * 100);
     }, [campaign]);
+
+    const messageSnippet = message.trim().length > 120 ? `${message.trim().slice(0, 120)}…` : message.trim();
 
     return (
         <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
@@ -276,6 +406,14 @@ export default function DisparadorPage() {
                 <p className="mt-2 text-xs text-text-secondary-light dark:text-text-secondary-dark">
                     Use {"{{nome}}"} para personalizar com o nome do membro.
                 </p>
+                <div className="mt-3 rounded-lg border border-border-light/80 bg-slate-50 px-3 py-2 dark:border-border-dark dark:bg-slate-900/50">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary-light dark:text-text-secondary-dark">
+                        Preview
+                    </p>
+                    <p className="mt-1 text-sm text-text-main-light dark:text-text-main-dark whitespace-pre-wrap">
+                        {messagePreview}
+                    </p>
+                </div>
                 <div className="mt-4 flex flex-wrap gap-4">
                     <label className="text-sm">
                         Delay mín (min)
@@ -307,8 +445,15 @@ export default function DisparadorPage() {
 
             <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="font-semibold">Membros</h2>
-                    <div className="flex gap-2">
+                    <div>
+                        <h2 className="font-semibold">Membros</h2>
+                        {!loading && members.length > 0 && (
+                            <p className="mt-0.5 text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                {selected.size} de {members.length} selecionados
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                         <input
                             ref={fileRef}
                             type="file"
@@ -324,9 +469,29 @@ export default function DisparadorPage() {
                         >
                             {importing ? "Importando..." : "Importar CSV"}
                         </button>
+                        {members.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => void handleClearList()}
+                                disabled={deleting}
+                                className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40 disabled:opacity-50"
+                            >
+                                Excluir lista
+                            </button>
+                        )}
+                        {selected.size > 0 && selected.size < members.length && (
+                            <button
+                                type="button"
+                                onClick={() => void handleDeleteSelected()}
+                                disabled={deleting}
+                                className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40 disabled:opacity-50"
+                            >
+                                Excluir selecionados
+                            </button>
+                        )}
                         <button
                             type="button"
-                            onClick={() => void handleDispatch()}
+                            onClick={openConfirmDispatch}
                             disabled={dispatching || loading || members.length === 0}
                             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                         >
@@ -358,6 +523,7 @@ export default function DisparadorPage() {
                                     </th>
                                     <th className="py-2">Nome</th>
                                     <th className="py-2">Telefone</th>
+                                    <th className="py-2 w-16">Ação</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -376,6 +542,17 @@ export default function DisparadorPage() {
                                         </td>
                                         <td className="py-2">{m.name}</td>
                                         <td className="py-2 font-mono text-xs">{m.phone_e164}</td>
+                                        <td className="py-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleDeleteOne(m)}
+                                                disabled={deleting}
+                                                className="text-xs text-red-600 hover:underline disabled:opacity-50"
+                                                aria-label={`Excluir ${m.name}`}
+                                            >
+                                                Excluir
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -383,6 +560,44 @@ export default function DisparadorPage() {
                     </div>
                 )}
             </section>
+
+            {recentCampaigns.length > 0 && (
+                <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
+                    <h2 className="mb-3 font-semibold">Campanhas recentes</h2>
+                    <ul className="divide-y divide-border-light dark:divide-border-dark">
+                        {recentCampaigns.map((c) => (
+                            <li key={c.id}>
+                                <button
+                                    type="button"
+                                    onClick={() => void openCampaignDetail(c)}
+                                    className="flex w-full flex-wrap items-center justify-between gap-2 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800/40 -mx-1 px-1 rounded-lg"
+                                >
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate font-medium">
+                                            {c.message.length > 80 ? `${c.message.slice(0, 80)}…` : c.message}
+                                        </p>
+                                        <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                            {formatCampaignDate(c.created_at)} · {c.sent}/{c.total} enviados
+                                            {c.failed > 0 ? ` · ${c.failed} falhas` : ""}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                                            c.status === "running"
+                                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                                : c.status === "completed" || c.status === "done"
+                                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                        }`}
+                                    >
+                                        {c.status}
+                                    </span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
 
             {campaign && (
                 <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
@@ -418,6 +633,48 @@ export default function DisparadorPage() {
                         ))}
                     </ul>
                 </section>
+            )}
+
+            {confirmOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-md space-y-4 rounded-2xl border border-border-light bg-surface-light p-6 shadow-xl dark:border-border-dark dark:bg-surface-dark">
+                        <h3 className="text-lg font-bold">Confirmar disparo</h3>
+                        <ul className="space-y-2 text-sm text-text-secondary-light dark:text-text-secondary-dark">
+                            <li>
+                                <strong className="text-text-main-light dark:text-text-main-dark">
+                                    {selected.size}
+                                </strong>{" "}
+                                destinatário{selected.size === 1 ? "" : "s"}
+                            </li>
+                            <li>
+                                Intervalo:{" "}
+                                <strong className="text-text-main-light dark:text-text-main-dark">
+                                    {minDelayMin}–{maxDelayMin} min
+                                </strong>
+                            </li>
+                            <li className="rounded-lg bg-slate-50 p-2 text-text-main-light dark:bg-slate-900/50 dark:text-text-main-dark">
+                                {messageSnippet || "(sem mensagem)"}
+                            </li>
+                        </ul>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setConfirmOpen(false)}
+                                className="h-10 rounded-xl border border-border-light px-4 text-sm dark:border-border-dark"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleDispatch()}
+                                disabled={dispatching}
+                                className="h-10 rounded-xl bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50"
+                            >
+                                Confirmar e disparar
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

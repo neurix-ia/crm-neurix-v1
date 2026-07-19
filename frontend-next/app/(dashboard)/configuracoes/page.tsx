@@ -500,8 +500,8 @@ function ConfiguracoesContent() {
     const searchParams = useSearchParams();
     const fromAdmin = searchParams.get("from") === "admin";
 
-    const [activeColor, setActiveColor] = useState("#8b5cf6");
-    const [pendingColor, setPendingColor] = useState("#8b5cf6");
+    const [activeColor, setActiveColor] = useState("#E11D48");
+    const [pendingColor, setPendingColor] = useState("#E11D48");
     const [showDashboardEdit, setShowDashboardEdit] = useState(false);
     const [showFunnelStats, setShowFunnelStats] = useState(false);
     const [showProductsPanel, setShowProductsPanel] = useState(false);
@@ -702,11 +702,11 @@ function ConfiguracoesContent() {
     ];
 
     const colorOptions = [
-        { value: "#8b5cf6", label: "Roxo" },
         { value: "#E11D48", label: "Rosa" },
         { value: "#DC2626", label: "Vermelho" },
         { value: "#2563EB", label: "Azul Royal" },
         { value: "#D97706", label: "Dourado" },
+        { value: "#0F766E", label: "Verde" },
     ];
 
     function applyColor() {

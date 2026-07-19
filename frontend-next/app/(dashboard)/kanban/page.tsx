@@ -2218,7 +2218,7 @@ function KanbanContent() {
                                         <div key={idx} className="flex justify-between items-center text-sm p-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 mx-1 rounded">
                                             <span>{Number(op.quantity ?? op.qty ?? 0)}x {op.name}</span>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[11px] text-purple-600 dark:text-purple-300">
+                                                <span className="text-[11px] text-primary dark:text-rose-300">
                                                     {op.applied_promotion_name ? op.applied_promotion_name : "Sem promoção"}
                                                 </span>
                                                 <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(op.line_total ?? ((Number(op.quantity ?? op.qty ?? 0)) * Number(op.price || 0))))}</span>

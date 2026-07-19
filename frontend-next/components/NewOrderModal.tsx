@@ -579,7 +579,7 @@ export default function NewOrderModal({ onClose, onCreated }: NewOrderModalProps
                                             className="w-full px-3 py-2 text-sm text-left hover:bg-primary/5 rounded-lg flex items-center justify-between"
                                         >
                                             <div className="flex items-center gap-2">
-                                                <span className="material-symbols-outlined text-base text-purple-500">
+                                                <span className="material-symbols-outlined text-base text-primary">
                                                     inventory_2
                                                 </span>
                                                 {product.name}

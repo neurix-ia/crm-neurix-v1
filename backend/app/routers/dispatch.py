@@ -111,6 +111,43 @@ async def list_members(
     return [DispatchMemberOut(**row) for row in (res.data or [])]
 
 
+class DeleteMembersRequest(BaseModel):
+    member_ids: Optional[list[str]] = None
+    all: bool = False
+
+
+class DeleteMembersResponse(BaseModel):
+    deleted: int
+
+
+@router.delete("/members", response_model=DeleteMembersResponse)
+async def delete_members_bulk(
+    body: DeleteMembersRequest,
+    user=Depends(get_current_user),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """Apaga todos os membros do tenant (`all=true`) ou um subconjunto por IDs."""
+    tid = _tenant_id(user)
+
+    if body.all:
+        res = supabase.table("dispatch_members").delete().eq("tenant_id", tid).execute()
+    elif body.member_ids:
+        res = (
+            supabase.table("dispatch_members")
+            .delete()
+            .eq("tenant_id", tid)
+            .in_("id", body.member_ids)
+            .execute()
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Informe all=true ou member_ids.",
+        )
+
+    return DeleteMembersResponse(deleted=len(res.data or []))
+
+
 @router.delete("/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member(
     member_id: UUID,

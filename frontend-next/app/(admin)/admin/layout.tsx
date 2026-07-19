@@ -60,7 +60,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     return (
         <div className="min-h-screen flex flex-col md:flex-row bg-background-light dark:bg-background-dark text-text-main-light dark:text-text-main-dark">
-            <div className="absolute inset-0 z-0 bg-gradient-to-br from-purple-50 via-white to-purple-100 dark:from-gray-900 dark:via-gray-900 dark:to-[#2a1b3d]" />
+            <div className="absolute inset-0 z-0 bg-gradient-to-br from-rose-50 via-white to-slate-100 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950" />
             <aside className="relative z-10 w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r border-border-light dark:border-border-dark glass-effect md:min-h-screen p-4 flex flex-col gap-4">
                 <div className="flex items-center gap-2 px-2">
                     <span className="material-symbols-outlined text-primary text-2xl">admin_panel_settings</span>

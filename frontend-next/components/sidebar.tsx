@@ -216,7 +216,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 {showProfile && (
                     <div className="absolute bottom-full left-3 right-3 mb-2 bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl border border-border-light dark:border-border-dark p-4 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
                         <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border-light dark:border-border-dark">
-                            <div className="h-12 w-12 rounded-full bg-gradient-to-tr from-primary to-purple-400 flex items-center justify-center text-white font-bold text-lg uppercase">
+                            <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-lg uppercase">
                                 {userInitials}
                             </div>
                             <div className="overflow-hidden">
@@ -253,7 +253,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => setShowProfile(!showProfile)}
-                        className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-tr from-primary to-purple-400 flex items-center justify-center text-white font-bold text-sm hover:scale-105 transition-transform cursor-pointer uppercase"
+                        className="h-9 w-9 shrink-0 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm hover:scale-105 transition-transform cursor-pointer uppercase"
                     >
                         {userInitials}
                     </button>

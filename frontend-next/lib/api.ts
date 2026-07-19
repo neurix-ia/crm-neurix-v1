@@ -1022,6 +1022,19 @@ export type DispatchCampaignDetail = DispatchCampaign & {
 export const listDispatchMembers = (token?: string) =>
     apiGet<DispatchMember[]>("/api/dispatch/members", token);
 
+export const deleteDispatchMember = (memberId: string, token?: string) =>
+    apiDelete<void>(`/api/dispatch/members/${encodeURIComponent(memberId)}`, token);
+
+export const deleteDispatchMembers = (
+    body: { member_ids?: string[]; all?: boolean },
+    token?: string
+) =>
+    api<{ deleted: number }>("/api/dispatch/members", {
+        method: "DELETE",
+        body: JSON.stringify(body),
+        token,
+    });
+
 export const createDispatchCampaign = (
     body: {
         message: string;
@@ -1036,6 +1049,9 @@ export const createDispatchCampaign = (
 
 export const getDispatchCampaign = (campaignId: string, token?: string) =>
     apiGet<DispatchCampaignDetail>(`/api/dispatch/campaigns/${encodeURIComponent(campaignId)}`, token);
+
+export const listDispatchCampaigns = (limit = 10, token?: string) =>
+    apiGet<DispatchCampaign[]>(`/api/dispatch/campaigns?limit=${limit}`, token);
 
 // ── Automação de etapa + auditoria (Sprint 11) ──
 

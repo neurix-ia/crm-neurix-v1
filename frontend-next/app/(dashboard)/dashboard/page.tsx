@@ -230,8 +230,8 @@ function ProductCard({ product, onClose }: { product: ProductDetail; onClose: ()
             <div className="relative bg-surface-light dark:bg-surface-dark rounded-2xl shadow-2xl border border-border-light dark:border-border-dark w-full max-w-md max-h-[85vh] overflow-y-auto">
                 <div className="p-6 border-b border-border-light dark:border-border-dark flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                            <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">inventory_2</span>
+                        <div className="p-2 bg-primary-light dark:bg-primary/20 rounded-lg">
+                            <span className="material-symbols-outlined text-primary">inventory_2</span>
                         </div>
                         <div>
                             <h3 className="text-lg font-bold font-display">{product.name}</h3>
@@ -545,7 +545,7 @@ export default function DashboardPage() {
         const colors = [
             { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-600 dark:text-orange-400" },
             { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400" },
-            { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-600 dark:text-purple-400" },
+            { bg: "bg-primary-light dark:bg-primary/20", text: "text-primary" },
             { bg: "bg-pink-100 dark:bg-pink-900/30", text: "text-pink-600 dark:text-pink-400" },
             { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-600 dark:text-green-400" },
         ];
@@ -643,7 +643,7 @@ export default function DashboardPage() {
                                             <p className="px-3 py-1 mt-1 text-[10px] font-semibold text-text-secondary-light uppercase tracking-wider">Produtos</p>
                                             {productResults.map((r) => (
                                                 <button key={r.id} onMouseDown={() => handleSelectResult(r)} className="w-full px-3 py-2 text-sm text-left hover:bg-primary/5 rounded-lg flex items-center gap-2">
-                                                    <span className="material-symbols-outlined text-base text-purple-500">inventory_2</span>
+                                                    <span className="material-symbols-outlined text-base text-primary">inventory_2</span>
                                                     {r.name}
                                                 </button>
                                             ))}

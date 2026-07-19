@@ -59,7 +59,7 @@ export default function LoginPage() {
     return (
         <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col relative overflow-hidden text-text-main-light dark:text-text-main-dark font-display">
             {/* Background */}
-            <div className="absolute inset-0 z-0 bg-gradient-to-br from-purple-50 via-white to-purple-100 dark:from-gray-900 dark:via-gray-900 dark:to-[#2a1b3d]" />
+            <div className="absolute inset-0 z-0 bg-gradient-to-br from-rose-50 via-white to-slate-100 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950" />
             <div className="absolute inset-0 z-0 bg-pattern" />
             <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-primary/5 blur-[100px] pointer-events-none" />
             <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full bg-primary/10 blur-[120px] pointer-events-none" />

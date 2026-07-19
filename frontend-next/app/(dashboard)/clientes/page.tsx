@@ -300,7 +300,7 @@ export default function ClientesPage() {
                                                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                                                         c.person_type === "PF"
                                                             ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                                            : "bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                                                            : "bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
                                                     }`}
                                                 >
                                                     <span className="material-symbols-outlined text-sm">
@@ -375,7 +375,7 @@ export default function ClientesPage() {
                                     className={`h-14 w-14 rounded-2xl flex items-center justify-center text-white font-bold text-lg ${
                                         selectedClient.person_type === "PF"
                                             ? "bg-gradient-to-br from-blue-500 to-blue-600"
-                                            : "bg-gradient-to-br from-purple-500 to-purple-600"
+                                            : "bg-primary"
                                     }`}
                                 >
                                     <span className="material-symbols-outlined text-2xl">
@@ -389,7 +389,7 @@ export default function ClientesPage() {
                                             className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                                                 selectedClient.person_type === "PF"
                                                     ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                                    : "bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                                                    : "bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
                                             }`}
                                         >
                                             {selectedClient.person_type === "PF" ? "Pessoa Física" : "Pessoa Jurídica"}
