@@ -561,6 +561,42 @@ export default function DisparadorPage() {
                 )}
             </section>
 
+            {campaign && (
+                <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
+                    <h2 className="mb-3 font-semibold">Progresso da campanha</h2>
+                    <div className="mb-2 flex justify-between text-sm">
+                        <span>Status: {campaign.status}</span>
+                        <span>
+                            {campaign.sent + campaign.failed}/{campaign.total}
+                        </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div
+                            className="h-full bg-primary transition-all"
+                            style={{ width: `${progress}%` }}
+                        />
+                    </div>
+                    <ul className="mt-4 max-h-48 space-y-1 overflow-y-auto text-xs">
+                        {campaign.targets.map((t) => (
+                            <li key={t.id} className="flex justify-between gap-2">
+                                <span>{t.name}</span>
+                                <span
+                                    className={
+                                        t.status === "sent"
+                                            ? "text-emerald-600"
+                                            : t.status === "failed"
+                                              ? "text-red-600"
+                                              : "text-slate-500"
+                                    }
+                                >
+                                    {t.status}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
+
             {recentCampaigns.length > 0 && (
                 <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
                     <h2 className="mb-3 font-semibold">Campanhas recentes</h2>
@@ -593,42 +629,6 @@ export default function DisparadorPage() {
                                         {c.status}
                                     </span>
                                 </button>
-                            </li>
-                        ))}
-                    </ul>
-                </section>
-            )}
-
-            {campaign && (
-                <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
-                    <h2 className="mb-3 font-semibold">Progresso da campanha</h2>
-                    <div className="mb-2 flex justify-between text-sm">
-                        <span>Status: {campaign.status}</span>
-                        <span>
-                            {campaign.sent + campaign.failed}/{campaign.total}
-                        </span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                        <div
-                            className="h-full bg-primary transition-all"
-                            style={{ width: `${progress}%` }}
-                        />
-                    </div>
-                    <ul className="mt-4 max-h-48 space-y-1 overflow-y-auto text-xs">
-                        {campaign.targets.map((t) => (
-                            <li key={t.id} className="flex justify-between gap-2">
-                                <span>{t.name}</span>
-                                <span
-                                    className={
-                                        t.status === "sent"
-                                            ? "text-emerald-600"
-                                            : t.status === "failed"
-                                              ? "text-red-600"
-                                              : "text-slate-500"
-                                    }
-                                >
-                                    {t.status}
-                                </span>
                             </li>
                         ))}
                     </ul>
