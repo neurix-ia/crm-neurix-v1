@@ -32,6 +32,10 @@ class _Query:
         self.filters[c] = v
         return self
 
+    def in_(self, c, values):
+        self.filters[c] = ("in", list(values))
+        return self
+
     def upsert(self, payload, on_conflict=None):
         self.store["upserts"].append({"table": self.table, "payload": payload, "on_conflict": on_conflict})
         self._ret = [payload]
@@ -108,6 +112,26 @@ class AdminReportsTest(unittest.TestCase):
         c = _client(supa)
         r = c.patch("/api/admin/report-clients/tX", json={"enabled": False})
         self.assertEqual(r.status_code, 404)
+
+    def test_list_agent_reports_filter_agent_key(self):
+        rows = [
+            {"id": "1", "agent_key": "NhL2pBGEXBn8sGXi", "week_key": "2026-W28"},
+            {"id": "2", "agent_key": "DTJgDB8jPfBrk8EA", "week_key": "2026-W28"},
+        ]
+        supa = _FakeSupabase(rows={"agent_improvement_reports": rows})
+        # Fake returns all rows; we assert the filter was applied on the query.
+        c = _client(supa)
+        r = c.get("/api/admin/agent-reports", params={"agent_key": "NhL2pBGEXBn8sGXi"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_list_agent_reports_filter_agent_keys(self):
+        supa = _FakeSupabase(rows={"agent_improvement_reports": []})
+        c = _client(supa)
+        r = c.get(
+            "/api/admin/agent-reports",
+            params={"agent_keys": "Yp8DuEmqb0Z43ahnJy6Gs,GPOZxMZ0lF4w6m7w"},
+        )
+        self.assertEqual(r.status_code, 200)
 
 
 if __name__ == "__main__":

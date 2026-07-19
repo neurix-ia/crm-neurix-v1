@@ -95,6 +95,11 @@ async def list_agent_reports(
     week_key: str | None = Query(None),
     severidade: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
+    agent_key: str | None = Query(None, description="Filtro por um agent_key (workflow id n8n)."),
+    agent_keys: str | None = Query(
+        None,
+        description="Filtro por vários agent_keys separados por vírgula.",
+    ),
     _eff: EffectiveRole = Depends(require_superadmin),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
@@ -105,6 +110,23 @@ async def list_agent_reports(
         q = q.eq("severidade", severidade)
     if status_filter:
         q = q.eq("status", status_filter)
+
+    keys: list[str] = []
+    if agent_keys:
+        keys.extend(k.strip() for k in agent_keys.split(",") if k.strip())
+    if agent_key and agent_key.strip():
+        keys.append(agent_key.strip())
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            uniq.append(k)
+    if len(uniq) == 1:
+        q = q.eq("agent_key", uniq[0])
+    elif len(uniq) > 1:
+        q = q.in_("agent_key", uniq)
+
     res = q.order("week_start", desc=True).execute()
     return res.data or []
 

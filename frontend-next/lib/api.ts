@@ -1178,13 +1178,21 @@ export type AgentImprovementReport = {
 };
 
 export const listAgentReports = (
-    opts?: { week_key?: string; severidade?: string; status?: string },
+    opts?: {
+        week_key?: string;
+        severidade?: string;
+        status?: string;
+        agent_key?: string;
+        agent_keys?: string[];
+    },
     token?: string
 ) => {
     const qs = new URLSearchParams();
     if (opts?.week_key) qs.set("week_key", opts.week_key);
     if (opts?.severidade) qs.set("severidade", opts.severidade);
     if (opts?.status) qs.set("status", opts.status);
+    if (opts?.agent_key) qs.set("agent_key", opts.agent_key);
+    if (opts?.agent_keys?.length) qs.set("agent_keys", opts.agent_keys.join(","));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return apiGet<AgentImprovementReport[]>(`/api/admin/agent-reports${suffix}`, token);
 };
