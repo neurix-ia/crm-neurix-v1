@@ -68,15 +68,15 @@ export default function DisparadorPage() {
         }
     }, [token]);
 
-    const loadCampaigns = useCallback(async () => {
-        if (!token) return;
+    const loadCampaigns = useCallback(async (): Promise<DispatchCampaign[]> => {
+        if (!token) return [];
         try {
             const list = await listDispatchCampaigns(10, token);
             setRecentCampaigns(list);
             return list;
         } catch {
             setRecentCampaigns([]);
-            return [] as DispatchCampaign[];
+            return [];
         }
     }, [token]);
 
