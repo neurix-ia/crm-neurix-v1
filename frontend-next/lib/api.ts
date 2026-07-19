@@ -966,10 +966,33 @@ export const initWhatsappInstance = (instanceName: string, token?: string, inbox
         token
     );
 
-export const connectWhatsappInstance = (token?: string, inboxId?: string) =>
-    apiPost<{ message: string; data: unknown; scope?: string }>(
+export type WhatsappConnectResult = {
+    message?: string;
+    mode: "qrcode" | "pairing" | "already_connected";
+    qrcode?: string;
+    pairingCode?: string;
+    phone?: string;
+    status?: string;
+    scope?: string;
+    data?: unknown;
+};
+
+export const ensureDispatchWhatsappInstance = (token?: string) =>
+    apiPost<{
+        token_ready: boolean;
+        created: boolean;
+        instance_name: string;
+        message: string;
+    }>("/api/whatsapp/ensure-dispatch", {}, token);
+
+export const connectWhatsappInstance = (
+    token?: string,
+    inboxId?: string,
+    body?: { phone?: string }
+) =>
+    apiPost<WhatsappConnectResult>(
         `/api/whatsapp/connect${whatsappInboxQuery(inboxId)}`,
-        {},
+        body ?? {},
         token
     );
 

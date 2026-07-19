@@ -5,6 +5,7 @@ Handles Uazapi instance management — escopado por inbox (Sprint 7) ou legado v
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from supabase import Client as SupabaseClient
 
+from app.config import get_settings
 from app.dependencies import get_current_user, get_supabase
 from app.services.uazapi_service import UazapiService
 
@@ -19,6 +21,7 @@ router = APIRouter()
 uazapi = UazapiService()
 
 UAZAPI_TOKEN_KEY = "instance_token"
+_MAX_INSTANCE_NAME_LEN = 60
 
 
 class ConnectRequest(BaseModel):
@@ -36,6 +39,111 @@ class TokenRequest(BaseModel):
         None,
         description="Nome da instância na Uazapi (o webhook envia em instanceName) — usado para resolver a caixa se o token não vier no payload.",
     )
+
+
+class ConnectBody(BaseModel):
+    phone: Optional[str] = Field(
+        None,
+        description="Só dígitos (ex. 5511999999999). Com telefone → código de pareamento; vazio → QR.",
+    )
+
+
+def dispatch_instance_name(email: str) -> str:
+    """Nome estável: disp-crm-{email sanitizado}."""
+    raw = (email or "").strip().lower()
+    raw = raw.replace("@", "-").replace(".", "-")
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", raw)
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+    if not cleaned:
+        cleaned = "user"
+    name = f"disp-crm-{cleaned}"
+    return name[:_MAX_INSTANCE_NAME_LEN].rstrip("-")
+
+
+def _extract_instance_token(payload: dict[str, Any], fallback_name: str = "") -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    token = payload.get("token")
+    if token:
+        return str(token)
+    inst = payload.get("instance")
+    if isinstance(inst, dict):
+        t = inst.get("token")
+        if t:
+            return str(t)
+    if fallback_name:
+        return fallback_name
+    return None
+
+
+def _instance_name_from_row(inst: dict[str, Any]) -> str:
+    nested = inst.get("instance") if isinstance(inst.get("instance"), dict) else {}
+    return str(
+        nested.get("instanceName")
+        or nested.get("name")
+        or inst.get("instanceName")
+        or inst.get("name")
+        or ""
+    )
+
+
+def _pick_pairing_code(obj: Any) -> str:
+    if not isinstance(obj, dict):
+        return ""
+    for key in ("pairingCode", "paircode", "pairCode", "pairing_code", "code", "linkCode"):
+        val = obj.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
+def _normalize_connect_response(connect_data: dict[str, Any], phone: Optional[str]) -> dict[str, Any]:
+    """Espelha a lógica do workflow n8n GeraQRCode-uazapi."""
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    instance = connect_data.get("instance") if isinstance(connect_data.get("instance"), dict) else {}
+    state = (
+        instance.get("state")
+        or instance.get("status")
+        or connect_data.get("state")
+        or connect_data.get("status")
+    )
+    if state in ("open", "connected"):
+        return {"mode": "already_connected", "status": state, "data": connect_data}
+
+    if digits:
+        pairing = _pick_pairing_code(instance) or _pick_pairing_code(connect_data)
+        if not pairing:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Telefone informado, mas a Uazapi não retornou código de pareamento.",
+            )
+        return {
+            "mode": "pairing",
+            "pairingCode": pairing,
+            "phone": digits,
+            "status": state,
+            "data": connect_data,
+        }
+
+    qrcode = (
+        instance.get("qrcode")
+        or instance.get("qr")
+        or connect_data.get("base64")
+        or connect_data.get("qrcode")
+        or connect_data.get("qr")
+        or ""
+    )
+    if not qrcode:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Resposta sem QR Code. Deixe o telefone vazio para gerar QR ou confira a instância.",
+        )
+    return {
+        "mode": "qrcode",
+        "qrcode": str(qrcode),
+        "status": state or "connecting",
+        "data": connect_data,
+    }
 
 
 def _legacy_settings_token(supabase: SupabaseClient, user_id: str) -> Optional[str]:
@@ -199,27 +307,108 @@ async def init_instance_route(
     return {"message": "Instância inicializada e webhook configurado", "token": instance_token}
 
 
+@router.post("/ensure-dispatch")
+async def ensure_dispatch_instance(
+    user=Depends(get_current_user),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """
+    Garante instância do Comunicados (legado settings) nomeada disp-crm-{email}.
+    Cria via admintoken se ainda não existir token no tenant.
+    """
+    uid = str(user.id)
+    email = (getattr(user, "email", None) or "") or ""
+    instance_name = dispatch_instance_name(email)
+
+    existing, _mode = _resolve_instance_token(supabase, uid, None)
+    if existing:
+        return {
+            "token_ready": True,
+            "created": False,
+            "instance_name": instance_name,
+            "message": "Token já configurado para este tenant.",
+        }
+
+    settings = get_settings()
+    if not (settings.UAZAPI_ADMIN_TOKEN or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="UAZAPI_ADMIN_TOKEN não configurado no servidor. Configure o WhatsApp em Configurações ou defina o admin token.",
+        )
+
+    instance_token: Optional[str] = None
+    try:
+        instances = await uazapi.list_instances()
+        for inst in instances or []:
+            if _instance_name_from_row(inst) == instance_name:
+                instance_token = _extract_instance_token(inst)
+                if not instance_token and isinstance(inst.get("instance"), dict):
+                    instance_token = _extract_instance_token(inst["instance"])
+                break
+    except Exception as e:
+        print(f"Error listing instances (ensure-dispatch): {e}")
+
+    created = False
+    if not instance_token:
+        try:
+            create_res = await uazapi.create_instance(name=instance_name)
+            instance_token = _extract_instance_token(create_res, fallback_name=instance_name)
+            created = True
+        except Exception as e:
+            print(f"Error create_instance (ensure-dispatch): {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Falha ao criar instância Uazapi: {e}",
+            ) from e
+
+    if not instance_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível obter token da instância de disparo.",
+        )
+
+    _save_token_legacy(supabase, uid, instance_token)
+    await _configure_webhook(instance_token)
+
+    return {
+        "token_ready": True,
+        "created": created,
+        "instance_name": instance_name,
+        "message": "Instância de disparo pronta.",
+    }
+
+
 @router.post("/connect")
 async def connect_instance(
+    body: Optional[ConnectBody] = None,
     inbox_id: Optional[str] = Query(None),
     user=Depends(get_current_user),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
-    """QR / conexão — requer token já salvo na caixa ou settings legado."""
+    """QR / pareamento — requer token já salvo na caixa ou settings legado."""
     uid = str(user.id)
+    phone = body.phone if body else None
     instance_token, mode = _resolve_instance_token(supabase, uid, inbox_id)
 
     if not instance_token:
         raise HTTPException(
             status_code=400,
-            detail="Nenhum token configurado. Inicialize a instância ou informe inbox_id com token.",
+            detail="Nenhum token configurado. Use ensure-dispatch no Comunicados ou configure em Configurações.",
         )
 
     try:
-        connect_data = await uazapi.connect_instance(instance_token=instance_token)
-        return {"message": "Connection initiated", "data": connect_data, "scope": mode}
+        connect_data = await uazapi.connect_instance(instance_token=instance_token, phone=phone)
+        normalized = _normalize_connect_response(
+            connect_data if isinstance(connect_data, dict) else {},
+            phone,
+        )
+        normalized["scope"] = mode
+        normalized["message"] = "Connection initiated"
+        return normalized
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao conectar: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao conectar: {str(e)}") from e
 
 
 @router.post("/token")

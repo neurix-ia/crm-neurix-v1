@@ -41,7 +41,7 @@ class UazapiService:
             return resp.json()
 
     async def init_instance(self, name: str) -> dict:
-        """Create a new WhatsApp instance via Uazapi (requires admin token)."""
+        """Create a new WhatsApp instance via Uazapi (requires admin token). Legacy path /instance/init."""
         payload = {"name": name}
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -49,6 +49,25 @@ class UazapiService:
                 json=payload,
                 headers=self._admin_headers(),
             )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def create_instance(self, name: str) -> dict:
+        """
+        Create instance via POST /instance/create (docs atuais).
+        Fallback para /instance/init se create retornar 404.
+        """
+        if not self.admin_token:
+            raise RuntimeError("UAZAPI_ADMIN_TOKEN não configurado no servidor.")
+        payload = {"name": name}
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{self.base_url}/instance/create",
+                json=payload,
+                headers=self._admin_headers(),
+            )
+            if resp.status_code == 404:
+                return await self.init_instance(name)
             resp.raise_for_status()
             return resp.json()
 
@@ -64,12 +83,19 @@ class UazapiService:
             resp.raise_for_status()
             return resp.json()
 
-    async def connect_instance(self, instance_token: str | None = None) -> dict:
-        """Generate QR Code / Start connection for the instance."""
-        async with httpx.AsyncClient(timeout=15) as client:
+    async def connect_instance(
+        self,
+        instance_token: str | None = None,
+        phone: str | None = None,
+    ) -> dict:
+        """Generate QR Code or pairing code (optional phone digits)."""
+        digits = "".join(c for c in (phone or "") if c.isdigit())
+        body: dict = {"phone": digits} if digits else {}
+        async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{self.base_url}/instance/connect",
                 headers=self._instance_headers(instance_token),
+                json=body,
             )
             resp.raise_for_status()
             return resp.json()

@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     apiFetch,
+    connectWhatsappInstance,
     createDispatchCampaign,
     deleteDispatchMember,
     deleteDispatchMembers,
+    disconnectWhatsappInstance,
+    ensureDispatchWhatsappInstance,
     getDispatchCampaign,
     getWhatsappStatus,
     listDispatchCampaigns,
     listDispatchMembers,
-    saveWhatsappToken,
     type DispatchCampaign,
     type DispatchCampaignDetail,
     type DispatchMember,
@@ -49,11 +51,13 @@ export default function DisparadorPage() {
     /** Delay entre envios, em minutos (enviado à API como segundos). */
     const [minDelayMin, setMinDelayMin] = useState(3);
     const [maxDelayMin, setMaxDelayMin] = useState(9);
-    const [whatsappToken, setWhatsappToken] = useState("");
     const [whatsappStatus, setWhatsappStatus] = useState<string>("—");
     const [whatsappConfigured, setWhatsappConfigured] = useState(false);
-    const [savingToken, setSavingToken] = useState(false);
-    const [tokenInfo, setTokenInfo] = useState<string | null>(null);
+    const [pairPhone, setPairPhone] = useState("");
+    const [qrCode, setQrCode] = useState<string | null>(null);
+    const [pairingCode, setPairingCode] = useState<string | null>(null);
+    const [connectingWa, setConnectingWa] = useState(false);
+    const [forceExpandWa, setForceExpandWa] = useState(false);
 
     const loadWhatsappStatus = useCallback(async () => {
         if (!token) return;
@@ -62,6 +66,11 @@ export default function DisparadorPage() {
             setWhatsappStatus(res.status);
             const noToken = (res.message || "").toLowerCase().includes("nenhum token");
             setWhatsappConfigured(!noToken);
+            if (res.status === "open" || res.status === "connected") {
+                setQrCode(null);
+                setPairingCode(null);
+                setForceExpandWa(false);
+            }
         } catch {
             setWhatsappStatus("desconhecido");
             setWhatsappConfigured(false);
@@ -80,20 +89,54 @@ export default function DisparadorPage() {
         }
     }, [token]);
 
-    const handleSaveWhatsappToken = async () => {
-        if (!token || !whatsappToken.trim()) return;
-        setSavingToken(true);
+    const handleConnectWhatsapp = async () => {
+        if (!token) return;
+        setConnectingWa(true);
         setError(null);
-        setTokenInfo(null);
+        setQrCode(null);
+        setPairingCode(null);
         try {
-            await saveWhatsappToken(whatsappToken.trim(), token);
+            await ensureDispatchWhatsappInstance(token);
+            const phoneDigits = pairPhone.replace(/\D/g, "");
+            const res = await connectWhatsappInstance(
+                token,
+                undefined,
+                phoneDigits ? { phone: phoneDigits } : {}
+            );
+            setWhatsappConfigured(true);
+            if (res.mode === "already_connected") {
+                setWhatsappStatus(res.status || "connected");
+                setForceExpandWa(false);
+            } else if (res.mode === "pairing" && res.pairingCode) {
+                setPairingCode(res.pairingCode);
+                setWhatsappStatus(res.status || "connecting");
+            } else if (res.mode === "qrcode" && res.qrcode) {
+                setQrCode(res.qrcode);
+                setWhatsappStatus(res.status || "connecting");
+            }
             await loadWhatsappStatus();
-            setWhatsappToken("");
-            setTokenInfo("Token salvo. Mesma configuração usada em Configurações > WhatsApp.");
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Erro ao salvar token do WhatsApp.");
+            setError(e instanceof Error ? e.message : "Erro ao conectar WhatsApp.");
         } finally {
-            setSavingToken(false);
+            setConnectingWa(false);
+        }
+    };
+
+    const handleDisconnectWhatsapp = async () => {
+        if (!token) return;
+        if (!confirm("Desconectar WhatsApp deste tenant?")) return;
+        setConnectingWa(true);
+        setError(null);
+        try {
+            await disconnectWhatsappInstance(token);
+            setQrCode(null);
+            setPairingCode(null);
+            setForceExpandWa(true);
+            await loadWhatsappStatus();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Erro ao desconectar.");
+        } finally {
+            setConnectingWa(false);
         }
     };
 
@@ -315,8 +358,13 @@ export default function DisparadorPage() {
         if (whatsappStatus === "open" || whatsappStatus === "connected") return "Conectado";
         if (whatsappStatus === "connecting") return "Conectando…";
         if (whatsappStatus === "disconnected") return "Desconectado";
+        if (whatsappStatus === "hibernated") return "Hibernado";
         return whatsappStatus;
     }, [whatsappStatus]);
+
+    const isWhatsappConnected =
+        whatsappStatus === "open" || whatsappStatus === "connected";
+    const showWhatsappCompact = isWhatsappConnected && !forceExpandWa;
 
     const progress = useMemo(() => {
         if (!campaign) return 0;
@@ -349,49 +397,153 @@ export default function DisparadorPage() {
                 </div>
             )}
 
-            {tokenInfo && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-                    {tokenInfo}
-                </div>
-            )}
-
             <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="font-semibold">WhatsApp</h2>
-                    <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            whatsappConfigured
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                        }`}
-                    >
-                        {whatsappConfigured ? whatsappStatusLabel : "Token não configurado"}
-                    </span>
-                </div>
-                <p className="mb-4 text-xs text-text-secondary-light dark:text-text-secondary-dark">
-                    Cole o token da instância WhatsApp. Ao salvar, aplica o mesmo efeito de Configurações &gt;
-                    WhatsApp (webhook configurado automaticamente).
-                </p>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <label className="flex-1 text-sm">
-                        Token da instância
-                        <input
-                            type="password"
-                            value={whatsappToken}
-                            onChange={(e) => setWhatsappToken(e.target.value)}
-                            placeholder="Token ou identificador da instância"
-                            className="mt-1 w-full rounded-lg border border-border-light bg-white px-3 py-2 text-sm dark:border-border-dark dark:bg-slate-900"
-                        />
-                    </label>
-                    <button
-                        type="button"
-                        onClick={() => void handleSaveWhatsappToken()}
-                        disabled={savingToken || !whatsappToken.trim()}
-                        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    >
-                        {savingToken ? "Salvando..." : "Salvar token"}
-                    </button>
-                </div>
+                {showWhatsappCompact ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <span className="material-symbols-outlined text-primary text-2xl">smartphone</span>
+                            <div>
+                                <h2 className="font-semibold">WhatsApp</h2>
+                                <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                    Pronto para disparos
+                                </p>
+                            </div>
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                {whatsappStatusLabel}
+                            </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => void loadWhatsappStatus()}
+                                className="rounded-lg border border-border-light px-3 py-2 text-sm hover:bg-slate-50 dark:border-border-dark dark:hover:bg-slate-800"
+                            >
+                                Atualizar status
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setForceExpandWa(true);
+                                    setQrCode(null);
+                                    setPairingCode(null);
+                                }}
+                                className="rounded-lg border border-border-light px-3 py-2 text-sm hover:bg-slate-50 dark:border-border-dark dark:hover:bg-slate-800"
+                            >
+                                Reconectar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleDisconnectWhatsapp()}
+                                disabled={connectingWa}
+                                className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40 disabled:opacity-50"
+                            >
+                                Desconectar
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h2 className="font-semibold">Conectar WhatsApp</h2>
+                                <p className="mt-0.5 text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                    QR Code ou código de pareamento (com telefone). A instância é criada
+                                    automaticamente se ainda não existir.
+                                </p>
+                            </div>
+                            <span
+                                className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                    isWhatsappConnected
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                        : whatsappConfigured
+                                          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                          : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                }`}
+                            >
+                                {whatsappConfigured ? whatsappStatusLabel : "Não configurado"}
+                            </span>
+                        </div>
+
+                        <label className="block text-sm">
+                            Telefone (código de pareamento)
+                            <input
+                                type="tel"
+                                value={pairPhone}
+                                onChange={(e) => setPairPhone(e.target.value)}
+                                placeholder="5511999999999"
+                                className="mt-1 w-full rounded-lg border border-border-light bg-white px-3 py-2 text-sm dark:border-border-dark dark:bg-slate-900"
+                            />
+                            <span className="mt-1 block text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                Formato internacional, só dígitos. Com telefone, gera o código de pareamento;
+                                vazio, gera QR Code.
+                            </span>
+                        </label>
+
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => void handleConnectWhatsapp()}
+                                disabled={connectingWa}
+                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                            >
+                                <span className="material-symbols-outlined text-lg">
+                                    {connectingWa ? "progress_activity" : "qr_code_scanner"}
+                                </span>
+                                {connectingWa ? "Conectando…" : "Conectar"}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void loadWhatsappStatus()}
+                                className="rounded-lg border border-border-light px-3 py-2 text-sm hover:bg-slate-50 dark:border-border-dark dark:hover:bg-slate-800"
+                            >
+                                Atualizar status
+                            </button>
+                            {isWhatsappConnected && (
+                                <button
+                                    type="button"
+                                    onClick={() => setForceExpandWa(false)}
+                                    className="rounded-lg border border-border-light px-3 py-2 text-sm hover:bg-slate-50 dark:border-border-dark dark:hover:bg-slate-800"
+                                >
+                                    Recolher
+                                </button>
+                            )}
+                        </div>
+
+                        {pairingCode && (
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-6 text-center">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary-light">
+                                    Código de pareamento
+                                </p>
+                                <p className="mt-2 font-mono text-3xl font-bold tracking-widest text-primary">
+                                    {pairingCode}
+                                </p>
+                                <p className="mt-2 text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                    No WhatsApp: Aparelhos conectados → Conectar com número de telefone
+                                </p>
+                            </div>
+                        )}
+
+                        {qrCode && !pairingCode && (
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="rounded-xl border-2 border-primary/20 bg-white p-4 shadow-inner">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                        src={
+                                            qrCode.startsWith("data:image")
+                                                ? qrCode
+                                                : `data:image/png;base64,${qrCode}`
+                                        }
+                                        alt="QR Code WhatsApp"
+                                        className="h-48 w-48 object-contain"
+                                    />
+                                </div>
+                                <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark">
+                                    Escaneie o QR no WhatsApp. Depois use Atualizar status.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
             </section>
 
             <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
