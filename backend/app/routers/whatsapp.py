@@ -220,6 +220,30 @@ def _save_token_legacy(supabase: SupabaseClient, user_id: str, instance_token: s
     ).execute()
 
 
+def _clear_token_legacy(supabase: SupabaseClient, user_id: str) -> None:
+    supabase.table("settings").delete().eq("tenant_id", user_id).eq("key", "uazapi_instance_token").execute()
+
+
+async def _instance_token_alive(instance_token: str) -> bool:
+    """False se a Uazapi rejeitar o token (instância apagada → 401/403/404)."""
+    import httpx
+
+    try:
+        await uazapi.get_instance_status(instance_token=instance_token)
+        return True
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response is not None else 0
+        if code in (401, 403, 404):
+            return False
+        # Outros erros HTTP: não descartar token automaticamente
+        return True
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "401" in msg or "unauthorized" in msg or "403" in msg or "404" in msg:
+            return False
+        return True
+
+
 async def _configure_webhook(instance_token: str) -> None:
     from app.config import get_settings
 
@@ -314,7 +338,8 @@ async def ensure_dispatch_instance(
 ):
     """
     Garante instância do Comunicados (legado settings) nomeada disp-crm-{email}.
-    Cria via admintoken se ainda não existir token no tenant.
+    Cria via admintoken se ainda não existir token válido no tenant.
+    Se o token salvo estiver morto (instância apagada na Uazapi), limpa e recria.
     """
     uid = str(user.id)
     email = (getattr(user, "email", None) or "") or ""
@@ -322,12 +347,17 @@ async def ensure_dispatch_instance(
 
     existing, _mode = _resolve_instance_token(supabase, uid, None)
     if existing:
-        return {
-            "token_ready": True,
-            "created": False,
-            "instance_name": instance_name,
-            "message": "Token já configurado para este tenant.",
-        }
+        if await _instance_token_alive(existing):
+            return {
+                "token_ready": True,
+                "created": False,
+                "recovered": False,
+                "instance_name": instance_name,
+                "message": "Token já configurado para este tenant.",
+            }
+        # Token órfão (ex.: instância deletada no painel Uazapi)
+        _clear_token_legacy(supabase, uid)
+        existing = None
 
     settings = get_settings()
     if not (settings.UAZAPI_ADMIN_TOKEN or "").strip():
@@ -349,6 +379,7 @@ async def ensure_dispatch_instance(
         print(f"Error listing instances (ensure-dispatch): {e}")
 
     created = False
+    recovered = True  # chegou aqui sem token válido prévio
     if not instance_token:
         try:
             create_res = await uazapi.create_instance(name=instance_name)
@@ -373,6 +404,7 @@ async def ensure_dispatch_instance(
     return {
         "token_ready": True,
         "created": created,
+        "recovered": recovered,
         "instance_name": instance_name,
         "message": "Instância de disparo pronta.",
     }
@@ -408,7 +440,18 @@ async def connect_instance(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao conectar: {str(e)}") from e
+        err = str(e)
+        # Token morto: limpa settings legado para o próximo Conectar recriar via ensure-dispatch
+        if mode == "legacy" and ("401" in err or "Unauthorized" in err or "unauthorized" in err.lower()):
+            _clear_token_legacy(supabase, uid)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "Token WhatsApp inválido (instância provavelmente foi apagada na Uazapi). "
+                    "O token antigo foi removido — clique em Conectar novamente para criar outra instância."
+                ),
+            ) from e
+        raise HTTPException(status_code=500, detail=f"Erro ao conectar: {err}") from e
 
 
 @router.post("/token")

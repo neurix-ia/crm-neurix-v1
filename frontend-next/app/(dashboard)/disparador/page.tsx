@@ -96,13 +96,29 @@ export default function DisparadorPage() {
         setQrCode(null);
         setPairingCode(null);
         try {
-            await ensureDispatchWhatsappInstance(token);
-            const phoneDigits = pairPhone.replace(/\D/g, "");
-            const res = await connectWhatsappInstance(
-                token,
-                undefined,
-                phoneDigits ? { phone: phoneDigits } : {}
-            );
+            const runConnect = async () => {
+                await ensureDispatchWhatsappInstance(token);
+                const phoneDigits = pairPhone.replace(/\D/g, "");
+                return connectWhatsappInstance(
+                    token,
+                    undefined,
+                    phoneDigits ? { phone: phoneDigits } : {}
+                );
+            };
+
+            let res;
+            try {
+                res = await runConnect();
+            } catch (firstErr) {
+                const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+                // Token órfão limpo no backend — 2º clique automático
+                if (/401|inválido|apagada|Unauthorized/i.test(msg)) {
+                    res = await runConnect();
+                } else {
+                    throw firstErr;
+                }
+            }
+
             setWhatsappConfigured(true);
             if (res.mode === "already_connected") {
                 setWhatsappStatus(res.status || "connected");
