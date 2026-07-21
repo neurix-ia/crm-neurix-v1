@@ -1226,3 +1226,68 @@ export const patchAgentReport = (reportId: string, status: string, token?: strin
         { status },
         token
     );
+
+// ── Evals (DeepEval) — histórico de runs por agente ──────────────────────────
+
+export type AgentEvalMetric = {
+    name: string;
+    score: number | null;
+    threshold: number | null;
+    success: boolean;
+    reason: string | null;
+};
+
+export type AgentEvalTestCase = {
+    name: string | null;
+    passed: boolean;
+    metrics: AgentEvalMetric[];
+};
+
+export type AgentEvalResult = {
+    test_cases: AgentEvalTestCase[];
+    summary: { total: number; passed: number; pass_rate: number | null };
+};
+
+export type AgentEvalSuggestion = {
+    severidade: string;
+    problema: string;
+    recomendacao: string;
+};
+
+export type AgentEvalRun = {
+    id: string;
+    agent_key: string;
+    agent_name: string;
+    job_id: string;
+    mode: string;
+    pass_rate: number | null;
+    total: number;
+    passed: number;
+    suggestions: AgentEvalSuggestion[];
+    started_at: string | null;
+    finished_at: string | null;
+    created_at: string;
+    /** Presente apenas no GET por id. */
+    result?: AgentEvalResult;
+};
+
+export const listAgentEvals = (
+    opts?: {
+        agent_key?: string;
+        agent_keys?: string[];
+        mode?: string;
+        limit?: number;
+    },
+    token?: string
+) => {
+    const qs = new URLSearchParams();
+    if (opts?.agent_key) qs.set("agent_key", opts.agent_key);
+    if (opts?.agent_keys?.length) qs.set("agent_keys", opts.agent_keys.join(","));
+    if (opts?.mode) qs.set("mode", opts.mode);
+    if (opts?.limit) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<AgentEvalRun[]>(`/api/admin/agent-evals${suffix}`, token);
+};
+
+export const getAgentEval = (runId: string, token?: string) =>
+    apiGet<AgentEvalRun>(`/api/admin/agent-evals/${encodeURIComponent(runId)}`, token);

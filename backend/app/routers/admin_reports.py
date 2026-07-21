@@ -149,3 +149,58 @@ async def patch_agent_report(
     if not (res.data or []):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relatório de agente não encontrado.")
     return {"status": "ok", "report": res.data[0]}
+
+
+# ── Evals (DeepEval) — histórico de runs por agente ──────────────────────────
+
+_EVAL_LIST_COLUMNS = (
+    "id, agent_key, agent_name, job_id, mode, pass_rate, total, passed, "
+    "suggestions, started_at, finished_at, created_at"
+)
+
+
+@router.get("/agent-evals")
+async def list_agent_evals(
+    agent_key: str | None = Query(None, description="Filtro por agent_key (workflow id n8n)."),
+    agent_keys: str | None = Query(None, description="Vários agent_keys separados por vírgula."),
+    mode: str | None = Query(None, description="baseline | mangle"),
+    limit: int = Query(50, ge=1, le=200),
+    _eff: EffectiveRole = Depends(require_superadmin),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """Lista runs de eval (sem o JSONB `result`, que é pesado — use o GET por id)."""
+    q = supabase.table("agent_eval_runs").select(_EVAL_LIST_COLUMNS)
+    keys: list[str] = []
+    if agent_keys:
+        keys.extend(k.strip() for k in agent_keys.split(",") if k.strip())
+    if agent_key and agent_key.strip():
+        keys.append(agent_key.strip())
+    uniq = list(dict.fromkeys(keys))
+    if len(uniq) == 1:
+        q = q.eq("agent_key", uniq[0])
+    elif len(uniq) > 1:
+        q = q.in_("agent_key", uniq)
+    if mode:
+        q = q.eq("mode", mode)
+    res = q.order("created_at", desc=True).limit(limit).execute()
+    return res.data or []
+
+
+@router.get("/agent-evals/{run_id}")
+async def get_agent_eval(
+    run_id: str,
+    _eff: EffectiveRole = Depends(require_superadmin),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """Run completo, incluindo o JSONB `result` (test_cases + summary)."""
+    res = (
+        supabase.table("agent_eval_runs")
+        .select("*")
+        .eq("id", run_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run de eval não encontrado.")
+    return rows[0]

@@ -17,6 +17,7 @@ const NAV = [
     { href: "/admin/inboxes", label: "Configurações / Inboxes" },
     { href: "/admin/automacao-auditoria", label: "Automação / Auditoria" },
     { href: "/admin/agentes-saude", label: "Saúde dos Agentes" },
+    { href: "/admin/agentes-evals", label: "Evals dos Agentes" },
     { href: "/admin/help", label: "Ajuda" },
 ];
 

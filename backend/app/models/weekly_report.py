@@ -54,3 +54,32 @@ class AgentReportIn(BaseModel):
     severidade: str = "media"
     problema: str
     recomendacoes: list[str] = Field(default_factory=list)
+
+
+class EvalSuggestionModel(BaseModel):
+    """Uma sugestão de melhoria gerada por LLM a partir do resultado do eval."""
+
+    severidade: str = "media"  # alta | media | baixa
+    problema: str
+    recomendacao: str = ""
+
+
+class AgentEvalRunIn(BaseModel):
+    """Payload for POST /reports/agent-eval — upserted into agent_eval_runs.
+
+    `result` é o JSON integral devolvido pelo deep-eval em /result/{job_id}
+    (chaves test_cases + summary). pass_rate/total/passed são denormalizados
+    do summary para listagem barata sem carregar o JSONB.
+    """
+
+    agent_key: str
+    agent_name: str
+    job_id: str
+    mode: str = "baseline"  # baseline | mangle
+    pass_rate: float | None = None
+    total: int = 0
+    passed: int = 0
+    result: dict = Field(default_factory=dict)
+    suggestions: list[EvalSuggestionModel] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None

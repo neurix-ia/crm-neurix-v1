@@ -17,7 +17,7 @@ from supabase import Client as SupabaseClient
 
 from app.config import Settings, get_settings
 from app.dependencies import get_supabase, verify_n8n_api_key
-from app.models.weekly_report import AgentReportIn, WeeklyReportIn
+from app.models.weekly_report import AgentEvalRunIn, AgentReportIn, WeeklyReportIn
 from app.observability import get_logger
 from app.services.uazapi_service import get_uazapi_service
 from app.services.report_hours import compute_horas_economizadas
@@ -150,6 +150,40 @@ async def ingest_agent_report(
         ) from exc
 
     return {"status": "ok"}
+
+
+@router.post("/reports/agent-eval")
+async def ingest_agent_eval_run(
+    payload: AgentEvalRunIn,
+    _caller: dict = Depends(verify_n8n_api_key),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """Upsert de um run da suíte de evals (DeepEval), idempotente por job_id."""
+    summary = payload.result.get("summary") if isinstance(payload.result, dict) else None
+    summary = summary if isinstance(summary, dict) else {}
+    row = {
+        "agent_key": payload.agent_key,
+        "agent_name": payload.agent_name,
+        "job_id": payload.job_id,
+        "mode": payload.mode,
+        "pass_rate": payload.pass_rate if payload.pass_rate is not None else summary.get("pass_rate"),
+        "total": payload.total or summary.get("total") or 0,
+        "passed": payload.passed or summary.get("passed") or 0,
+        "result": payload.result,
+        "suggestions": [s.model_dump() for s in payload.suggestions],
+        "started_at": _iso(payload.started_at) if payload.started_at else None,
+        "finished_at": _iso(payload.finished_at) if payload.finished_at else None,
+    }
+    try:
+        supabase.table("agent_eval_runs").upsert(row, on_conflict="job_id").execute()
+    except Exception as exc:
+        logger.exception("agent_eval_upsert_failed", extra={"job_id": payload.job_id})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao salvar run de eval: {exc}",
+        ) from exc
+
+    return {"status": "ok", "job_id": payload.job_id}
 
 
 @router.get("/reports/pending-notifications")
