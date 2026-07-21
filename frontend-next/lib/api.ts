@@ -1407,7 +1407,7 @@ export async function downloadVendiExport(
     token?: string
 ): Promise<void> {
     const path = getVendiExportUrl(opts);
-    const res = await apiFetch(path, { method: "GET" }, token);
+    const res = await apiFetch(path, { method: "GET", token });
     if (!res.ok) {
         const detail = await res.text().catch(() => "");
         throw new Error(detail || `Export failed (${res.status})`);
