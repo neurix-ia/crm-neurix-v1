@@ -29,8 +29,10 @@ from app.routers import (
     leads,
     n8n_reports,
     n8n_tools,
+    n8n_vendi,
     n8n_webhook,
     orders,
+    vendi,
     organizations,
     product_categories,
     products,
@@ -121,6 +123,8 @@ def create_app() -> FastAPI:
     app.include_router(n8n_webhook.router, prefix="/api/n8n", tags=["N8n Integration"])
     app.include_router(n8n_tools.router, prefix="/api/n8n", tags=["N8n Integration"])
     app.include_router(n8n_reports.router, prefix="/api/n8n", tags=["N8n Reports"])
+    app.include_router(n8n_vendi.router, prefix="/api/n8n", tags=["N8n Vendi"])
+    app.include_router(vendi.router, prefix="/api/vendi", tags=["Vendi"])
     app.include_router(dispatch.router, prefix="/api/dispatch", tags=["Disparador"])
     app.include_router(keyword_rules.router, prefix="/api/keyword-rules", tags=["Regras de Keywords"])
     app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])

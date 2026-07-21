@@ -1291,3 +1291,143 @@ export const listAgentEvals = (
 
 export const getAgentEval = (runId: string, token?: string) =>
     apiGet<AgentEvalRun>(`/api/admin/agent-evals/${encodeURIComponent(runId)}`, token);
+
+// ── Vendi (vendas de rua) ────────────────────────────────────────────────────
+
+export type VendiMatchStatus = "match" | "mismatch" | "audio_only" | "typed_only" | "no_phone";
+
+export type StreetSale = {
+    id: string;
+    tenant_id: string;
+    seller_name: string;
+    seller_user_id?: string | null;
+    client_id?: string | null;
+    order_id?: string | null;
+    phone_typed?: string | null;
+    phone_from_audio?: string | null;
+    phone_final: string;
+    match_status: VendiMatchStatus;
+    transcript?: string | null;
+    photo_url?: string | null;
+    audio_url?: string | null;
+    pao_italiano_qtd: number;
+    pao_integral_qtd: number;
+    geolocation?: Record<string, unknown> | null;
+    sold_at: string;
+    created_at: string;
+    metadata?: Record<string, unknown>;
+    client_display_name?: string | null;
+};
+
+export type VendiSalesAggregates = {
+    total_sales: number;
+    pao_italiano_qtd: number;
+    pao_integral_qtd: number;
+    total_units: number;
+};
+
+export type VendiSalesListResponse = {
+    sales: StreetSale[];
+    aggregates: VendiSalesAggregates;
+    from_ts?: string | null;
+    to_ts?: string | null;
+};
+
+export type VendiActiveClient = {
+    client_id: string;
+    display_name: string;
+    phone?: string | null;
+    last_sale_at: string;
+    sales_count: number;
+    total_units: number;
+};
+
+export type VendiPeriod = "day" | "week" | "month";
+
+export const listVendiSales = (
+    opts?: {
+        period?: VendiPeriod;
+        from?: string;
+        to?: string;
+        since?: string;
+        since_id?: string;
+        tenant_id?: string;
+        limit?: number;
+    },
+    token?: string
+) => {
+    const qs = new URLSearchParams();
+    if (opts?.period) qs.set("period", opts.period);
+    if (opts?.from) qs.set("from", opts.from);
+    if (opts?.to) qs.set("to", opts.to);
+    if (opts?.since) qs.set("since", opts.since);
+    if (opts?.since_id) qs.set("since_id", opts.since_id);
+    if (opts?.tenant_id) qs.set("tenant_id", opts.tenant_id);
+    if (opts?.limit) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<VendiSalesListResponse>(`/api/vendi/sales${suffix}`, token);
+};
+
+export const getVendiSale = (saleId: string, tenantId?: string, token?: string) => {
+    const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return apiGet<StreetSale>(`/api/vendi/sales/${encodeURIComponent(saleId)}${qs}`, token);
+};
+
+export const listVendiActiveClients = (
+    opts?: { from?: string; to?: string; tenant_id?: string; limit?: number },
+    token?: string
+) => {
+    const qs = new URLSearchParams();
+    if (opts?.from) qs.set("from", opts.from);
+    if (opts?.to) qs.set("to", opts.to);
+    if (opts?.tenant_id) qs.set("tenant_id", opts.tenant_id);
+    if (opts?.limit) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<VendiActiveClient[]>(`/api/vendi/clients${suffix}`, token);
+};
+
+/** URL relativa para download CSV (usa token no fetch manual). */
+export function getVendiExportUrl(opts?: {
+    period?: VendiPeriod;
+    from?: string;
+    to?: string;
+    tenant_id?: string;
+}): string {
+    const qs = new URLSearchParams();
+    if (opts?.period) qs.set("period", opts.period);
+    if (opts?.from) qs.set("from", opts.from);
+    if (opts?.to) qs.set("to", opts.to);
+    if (opts?.tenant_id) qs.set("tenant_id", opts.tenant_id);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return `/api/vendi/sales/export${suffix}`;
+}
+
+export async function downloadVendiExport(
+    opts?: { period?: VendiPeriod; from?: string; to?: string; tenant_id?: string },
+    token?: string
+): Promise<void> {
+    const path = getVendiExportUrl(opts);
+    const res = await apiFetch(path, { method: "GET" }, token);
+    if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(detail || `Export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vendi_${opts?.period || "export"}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+/** Webhook n8n do registro de venda (HTML/seller → n8n). */
+export function getVendiWebhookUrl(): string {
+    return (
+        process.env.NEXT_PUBLIC_VENDI_WEBHOOK_URL ||
+        "https://n8n-neurix-1.wbtech.dev/webhook/vendi-registro"
+    );
+}
+

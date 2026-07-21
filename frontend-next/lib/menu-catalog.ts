@@ -6,6 +6,7 @@ export type MenuItemKey =
     | "clientes"
     | "produtos"
     | "comunicados"
+    | "vendi"
     | "relatorios"
     | "configuracoes";
 
@@ -23,6 +24,7 @@ export const MENU_CATALOG: MenuCatalogItem[] = [
     { key: "clientes", label: "Clientes", route: "/clientes", icon: "person_search", section: "main" },
     { key: "produtos", label: "Produtos", route: "/produtos", icon: "inventory_2", section: "main" },
     { key: "comunicados", label: "Comunicados", route: "/disparador", icon: "campaign", section: "main" },
+    { key: "vendi", label: "Vendi", route: "/vendi", icon: "storefront", section: "main" },
     { key: "relatorios", label: "Relatórios", route: "/relatorios", icon: "summarize", section: "main" },
     { key: "configuracoes", label: "Configurações", route: "/configuracoes", icon: "settings", section: "system" },
 ];
@@ -33,6 +35,7 @@ export const DEFAULT_MENU_CONFIG: Record<MenuItemKey, boolean> = {
     clientes: true,
     produtos: true,
     comunicados: false,
+    vendi: false,
     relatorios: true,
     configuracoes: true,
 };

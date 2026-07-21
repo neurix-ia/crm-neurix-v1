@@ -41,6 +41,17 @@ export default function LoginPage() {
                     setPostLoginChoice(true);
                     return;
                 }
+                const redirect =
+                    typeof window !== "undefined"
+                        ? new URLSearchParams(window.location.search).get("redirect")
+                        : null;
+                if (redirect && redirect.startsWith("/")) {
+                    router.push(redirect);
+                    return;
+                }
+                const { firstEnabledRoute } = await import("@/lib/menu-catalog");
+                router.push(firstEnabledRoute(me.menu_config || {}));
+                return;
             } catch {
                 /* fallback: app normal */
             }

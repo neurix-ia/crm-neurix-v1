@@ -14,6 +14,7 @@ MENU_CATALOG: list[dict[str, str]] = [
     {"key": "clientes", "label": "Clientes", "route": "/clientes", "icon": "person_search"},
     {"key": "produtos", "label": "Produtos", "route": "/produtos", "icon": "inventory_2"},
     {"key": "comunicados", "label": "Comunicados", "route": "/disparador", "icon": "campaign"},
+    {"key": "vendi", "label": "Vendi", "route": "/vendi", "icon": "storefront"},
     {"key": "relatorios", "label": "Relatórios", "route": "/relatorios", "icon": "summarize"},
     {"key": "configuracoes", "label": "Configurações", "route": "/configuracoes", "icon": "settings"},
 ]
@@ -27,6 +28,7 @@ DEFAULT_MENU_CONFIG: dict[str, bool] = {
     "clientes": True,
     "produtos": True,
     "comunicados": False,
+    "vendi": False,
     "relatorios": True,
     "configuracoes": True,
 }
