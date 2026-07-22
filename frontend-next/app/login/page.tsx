@@ -87,7 +87,7 @@ export default function LoginPage() {
                             Neurix CRM
                         </h1>
                         <p className="text-text-secondary-light dark:text-text-secondary-dark text-base">
-                            Faça login para gerenciar sua produção
+                            Faça login para continuar
                         </p>
                     </div>
 
@@ -249,7 +249,7 @@ export default function LoginPage() {
                     {/* Bottom */}
                     <div className="text-center space-y-2">
                         <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark font-medium">
-                            Neurix CRM v1.0 • Sua fábrica de geleias conectada
+                            Neurix CRM
                         </p>
                         <div className="flex justify-center gap-2">
                             <div className="h-1 w-1 rounded-full bg-primary/40" />
