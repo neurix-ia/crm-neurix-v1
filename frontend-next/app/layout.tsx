@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Neurix CRM",
-  description: "CRM para fábricas de geleias — Gestão de vendas, leads e produção",
+  description: "CRM Neurix — Gestão de vendas, leads e operação",
 };
 
 export default function RootLayout({

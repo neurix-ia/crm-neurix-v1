@@ -698,7 +698,7 @@ function ConfiguracoesContent() {
     const modules = [
         { icon: "dashboard", name: "Painel Principal", desc: "Visualização geral de métricas", action: () => setShowDashboardEdit(true) },
         { icon: "trending_up", name: "Funil de Vendas", desc: "Gestão de leads e oportunidades", action: () => setShowFunnelStats(true) },
-        { icon: "inventory_2", name: "Produtos", desc: "Catálogo de geleias e insumos", action: () => setShowProductsPanel(true) },
+        { icon: "inventory_2", name: "Produtos", desc: "Catálogo de produtos e insumos", action: () => setShowProductsPanel(true) },
     ];
 
     const colorOptions = [
