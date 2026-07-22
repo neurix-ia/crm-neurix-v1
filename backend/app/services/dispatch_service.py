@@ -7,12 +7,15 @@ import io
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException, status
 from supabase import Client as SupabaseClient
 
-from app.config import get_settings
+from app.config import Settings, get_settings
+from app.services.hq_n8n_service import parse_n8n_instances
+from app.services.n8n_instance_client import N8nInstanceClient
 from app.services.phone_normalize import digits_only
 
 logger = logging.getLogger(__name__)
@@ -144,6 +147,62 @@ def upsert_members(supabase: SupabaseClient, tenant_id: str, rows: list[dict[str
     ]
     supabase.table("dispatch_members").upsert(payload, on_conflict="tenant_id,phone_e164").execute()
     return len(payload)
+
+
+def resolve_dispatch_n8n_client(settings: Settings | None = None) -> Optional[N8nInstanceClient]:
+    settings = settings or get_settings()
+    instances = parse_n8n_instances(settings)
+    if not instances:
+        return None
+    preferred = (settings.N8N_DISPATCH_INSTANCE_ID or "").strip()
+    if preferred:
+        for cfg in instances:
+            if cfg.id == preferred:
+                return N8nInstanceClient(cfg, verify_ssl=settings.N8N_SSL_VERIFY)
+    webhook = (settings.N8N_DISPATCH_WEBHOOK_URL or "").strip()
+    host = urlparse(webhook).netloc.lower() if webhook else ""
+    if host:
+        for cfg in instances:
+            if urlparse(cfg.base_url).netloc.lower() == host:
+                return N8nInstanceClient(cfg, verify_ssl=settings.N8N_SSL_VERIFY)
+    return N8nInstanceClient(instances[0], verify_ssl=settings.N8N_SSL_VERIFY)
+
+
+async def cancel_n8n_execution(execution_id: str) -> dict[str, Any]:
+    client = resolve_dispatch_n8n_client()
+    if not client:
+        return {
+            "n8n_stopped": False,
+            "n8n_deleted": False,
+            "n8n_error": "N8N_INSTANCES não configurado para stop/delete.",
+        }
+    stopped = False
+    deleted = False
+    err: Optional[str] = None
+    try:
+        await client.stop_execution(execution_id)
+        stopped = True
+    except Exception as exc:
+        msg = str(exc)
+        if "404" not in msg and "Not Found" not in msg:
+            err = f"stop: {msg}"
+    try:
+        await client.delete_execution(execution_id)
+        deleted = True
+    except Exception as exc:
+        err = (err + "; " if err else "") + f"delete: {exc}"
+    return {"n8n_stopped": stopped, "n8n_deleted": deleted, "n8n_error": err}
+
+
+def save_campaign_execution_id(
+    supabase: SupabaseClient, campaign_id: str, execution_id: str
+) -> None:
+    supabase.table("dispatch_campaigns").update(
+        {
+            "n8n_execution_id": execution_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("id", campaign_id).execute()
 
 
 async def trigger_n8n_dispatch(payload: dict[str, Any]) -> None:
