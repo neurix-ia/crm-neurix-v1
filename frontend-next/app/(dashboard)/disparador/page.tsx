@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     apiFetch,
     connectWhatsappInstance,
+    cancelDispatchCampaign,
     createDispatchCampaign,
     deleteDispatchMember,
     deleteDispatchMembers,
@@ -42,6 +43,7 @@ export default function DisparadorPage() {
     const [loading, setLoading] = useState(true);
     const [importing, setImporting] = useState(false);
     const [dispatching, setDispatching] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [importInfo, setImportInfo] = useState<string | null>(null);
@@ -185,6 +187,29 @@ export default function DisparadorPage() {
         },
         [token, loadCampaigns]
     );
+
+    const handleCancelCampaign = async () => {
+        if (!token || !campaign || campaign.status !== "running") return;
+        if (!window.confirm("Cancelar o envio desta campanha?")) return;
+        setCancelling(true);
+        setError(null);
+        try {
+            const res = await cancelDispatchCampaign(campaign.id, token);
+            setCampaign({ ...campaign, ...res, targets: campaign.targets });
+            await loadCampaigns();
+            if (res.n8n_error) {
+                setError(
+                    res.n8n_deleted
+                        ? null
+                        : `Campanha cancelada. Aviso n8n: ${res.n8n_error}`
+                );
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Erro ao cancelar campanha.");
+        } finally {
+            setCancelling(false);
+        }
+    };
 
     useEffect(() => {
         void loadMembers();
@@ -731,7 +756,19 @@ export default function DisparadorPage() {
 
             {campaign && (
                 <section className="rounded-xl border border-border-light bg-surface-light p-5 dark:border-border-dark dark:bg-surface-dark">
-                    <h2 className="mb-3 font-semibold">Progresso da campanha</h2>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <h2 className="font-semibold">Progresso da campanha</h2>
+                        {campaign.status === "running" && (
+                            <button
+                                type="button"
+                                onClick={() => void handleCancelCampaign()}
+                                disabled={cancelling}
+                                className="rounded-lg border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
+                            >
+                                {cancelling ? "Cancelando…" : "Cancelar envio"}
+                            </button>
+                        )}
+                    </div>
                     <div className="mb-2 flex justify-between text-sm">
                         <span>Status: {campaign.status}</span>
                         <span>
@@ -787,11 +824,13 @@ export default function DisparadorPage() {
                                     </div>
                                     <span
                                         className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                                            c.status === "running"
-                                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                                                : c.status === "completed" || c.status === "done"
-                                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                                                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                            c.status === "cancelled"
+                                                ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                                : c.status === "running"
+                                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                                  : c.status === "completed" || c.status === "done"
+                                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                                    : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
                                         }`}
                                     >
                                         {c.status}

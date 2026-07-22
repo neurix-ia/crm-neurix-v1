@@ -1076,6 +1076,19 @@ export const getDispatchCampaign = (campaignId: string, token?: string) =>
 export const listDispatchCampaigns = (limit = 10, token?: string) =>
     apiGet<DispatchCampaign[]>(`/api/dispatch/campaigns?limit=${limit}`, token);
 
+export type CancelDispatchCampaignResult = DispatchCampaign & {
+    n8n_stopped: boolean;
+    n8n_deleted: boolean;
+    n8n_error?: string | null;
+};
+
+export const cancelDispatchCampaign = (campaignId: string, token?: string) =>
+    apiPost<CancelDispatchCampaignResult>(
+        `/api/dispatch/campaigns/${encodeURIComponent(campaignId)}/cancel`,
+        {},
+        token
+    );
+
 // ── Automação de etapa + auditoria (Sprint 11) ──
 
 export type StageAutomationDTO = {
