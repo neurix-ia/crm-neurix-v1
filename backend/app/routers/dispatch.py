@@ -15,6 +15,7 @@ from app.dependencies import get_current_user, get_supabase
 from app.services.dispatch_service import (
     DEFAULT_MAX_DELAY,
     DEFAULT_MIN_DELAY,
+    cancel_n8n_execution,
     parse_members_csv,
     refresh_campaign_counters,
     resolve_instance_token,
@@ -64,6 +65,12 @@ class CampaignOut(BaseModel):
 
 class CampaignDetailOut(CampaignOut):
     targets: list[dict[str, Any]]
+
+
+class CancelCampaignOut(CampaignOut):
+    n8n_stopped: bool = False
+    n8n_deleted: bool = False
+    n8n_error: Optional[str] = None
 
 
 def _tenant_id(user) -> str:
@@ -333,3 +340,71 @@ async def list_campaigns(
         )
         for r in (res.data or [])
     ]
+
+
+@router.post("/campaigns/{campaign_id}/cancel", response_model=CancelCampaignOut)
+async def cancel_campaign(
+    campaign_id: UUID,
+    user=Depends(get_current_user),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    tid = _tenant_id(user)
+    res = (
+        supabase.table("dispatch_campaigns")
+        .select("*")
+        .eq("id", str(campaign_id))
+        .eq("tenant_id", tid)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campanha não encontrada.")
+    campaign = rows[0]
+    if campaign.get("status") != "running":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Só é possível cancelar campanhas em andamento.",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.table("dispatch_campaigns").update(
+        {"status": "cancelled", "finished_at": now, "updated_at": now}
+    ).eq("id", str(campaign_id)).eq("tenant_id", tid).execute()
+
+    n8n_stopped = False
+    n8n_deleted = False
+    n8n_error = None
+    eid = (campaign.get("n8n_execution_id") or "").strip()
+    if eid:
+        n8n_res = await cancel_n8n_execution(eid)
+        n8n_stopped = bool(n8n_res.get("n8n_stopped"))
+        n8n_deleted = bool(n8n_res.get("n8n_deleted"))
+        n8n_error = n8n_res.get("n8n_error")
+    else:
+        n8n_error = "Sem execution_id — cancelado só no CRM."
+
+    refreshed = (
+        supabase.table("dispatch_campaigns")
+        .select("*")
+        .eq("id", str(campaign_id))
+        .limit(1)
+        .execute()
+    ).data[0]
+
+    return CancelCampaignOut(
+        id=str(refreshed["id"]),
+        message=refreshed["message"],
+        status=refreshed["status"],
+        min_delay=refreshed["min_delay"],
+        max_delay=refreshed["max_delay"],
+        total=refreshed.get("total") or 0,
+        sent=refreshed.get("sent") or 0,
+        failed=refreshed.get("failed") or 0,
+        created_at=refreshed.get("created_at"),
+        started_at=refreshed.get("started_at"),
+        finished_at=refreshed.get("finished_at"),
+        n8n_stopped=n8n_stopped,
+        n8n_deleted=n8n_deleted,
+        n8n_error=n8n_error,
+    )
