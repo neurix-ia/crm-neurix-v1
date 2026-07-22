@@ -84,6 +84,20 @@ def _period_bounds(
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
+def _street_sales_error_detail(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if "street_sales" in msg and (
+        "does not exist" in msg or "undefined_table" in msg or "42p01" in msg
+    ):
+        return (
+            "Tabela street_sales inexistente. Aplique a migration "
+            "backend/migrations/022_street_sales.sql no Supabase."
+        )
+    if "permission denied" in msg or "rls" in msg:
+        return f"Sem permissão para ler street_sales: {exc}"
+    return f"Falha ao consultar street_sales: {exc}"
+
+
 def _fetch_sales(
     supabase: SupabaseClient,
     tenant_id: str,
@@ -94,25 +108,33 @@ def _fetch_sales(
     since_id: Optional[str],
     limit: int = 200,
 ) -> list[dict[str, Any]]:
-    q = (
-        supabase.table("street_sales")
-        .select("*")
-        .eq("tenant_id", tenant_id)
-        .order("sold_at", desc=True)
-        .limit(limit)
-    )
-    if from_ts:
-        q = q.gte("sold_at", from_ts.isoformat())
-    if to_ts:
-        q = q.lte("sold_at", to_ts.isoformat())
-    if since:
-        q = q.gt("sold_at", since.isoformat())
-    if since_id:
-        # delta: vendas com created_at > da venda since_id — fallback por sold_at já cobre poll
-        pass
+    try:
+        q = (
+            supabase.table("street_sales")
+            .select("*")
+            .eq("tenant_id", tenant_id)
+            .order("sold_at", desc=True)
+            .limit(limit)
+        )
+        if from_ts:
+            q = q.gte("sold_at", from_ts.isoformat())
+        if to_ts:
+            q = q.lte("sold_at", to_ts.isoformat())
+        if since:
+            q = q.gt("sold_at", since.isoformat())
+        if since_id:
+            # delta: vendas com created_at > da venda since_id — fallback por sold_at já cobre poll
+            pass
 
-    res = q.execute()
-    return list(res.data or [])
+        res = q.execute()
+        return list(res.data or [])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_street_sales_error_detail(exc),
+        ) from exc
 
 
 def _client_names(supabase: SupabaseClient, client_ids: list[str]) -> dict[str, str]:
@@ -257,14 +279,20 @@ async def get_vendi_sale(
     supabase: SupabaseClient = Depends(get_supabase),
 ):
     tid = _resolve_tenant(supabase, eff, user["id"], tenant_id)
-    res = (
-        supabase.table("street_sales")
-        .select("*")
-        .eq("id", sale_id)
-        .eq("tenant_id", tid)
-        .limit(1)
-        .execute()
-    )
+    try:
+        res = (
+            supabase.table("street_sales")
+            .select("*")
+            .eq("id", sale_id)
+            .eq("tenant_id", tid)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_street_sales_error_detail(exc),
+        ) from exc
     row = (res.data or [None])[0]
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Venda não encontrada.")

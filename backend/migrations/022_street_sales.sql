@@ -37,12 +37,19 @@ CREATE INDEX IF NOT EXISTS idx_street_sales_client
 
 ALTER TABLE public.street_sales ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS street_sales_select ON public.street_sales;
 CREATE POLICY street_sales_select ON public.street_sales
     FOR SELECT USING (auth.uid() = tenant_id);
+
+DROP POLICY IF EXISTS street_sales_insert ON public.street_sales;
 CREATE POLICY street_sales_insert ON public.street_sales
     FOR INSERT WITH CHECK (auth.uid() = tenant_id);
+
+DROP POLICY IF EXISTS street_sales_update ON public.street_sales;
 CREATE POLICY street_sales_update ON public.street_sales
     FOR UPDATE USING (auth.uid() = tenant_id);
+
+DROP POLICY IF EXISTS street_sales_delete ON public.street_sales;
 CREATE POLICY street_sales_delete ON public.street_sales
     FOR DELETE USING (auth.uid() = tenant_id);
 

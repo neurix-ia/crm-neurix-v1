@@ -304,11 +304,15 @@ export default function VendiAdminPage() {
                     </Link>
                     <button
                         type="button"
-                        onClick={() => void loadPeriod()}
+                        title="Atualizar agora — refresh imediato do período (qualquer horário)"
+                        onClick={() => {
+                            void loadPeriod();
+                            void loadClients();
+                        }}
                         className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-border-light dark:border-border-dark text-sm font-semibold"
                     >
                         <span className="material-symbols-outlined text-[18px]">refresh</span>
-                        Atualizar
+                        Atualizar agora
                     </button>
                     <button
                         type="button"
@@ -376,7 +380,7 @@ export default function VendiAdminPage() {
             {tab === "feed" && (
                 <div className="flex flex-col gap-2">
                     <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark">
-                        Atualização automática a cada 15 min entre 07h e 19h (Brasília). Fora disso, use Atualizar.
+                        Atualização automática a cada 15 min entre 07h e 19h (Brasília). Fora disso (ou a qualquer hora), use Atualizar agora.
                     </p>
                     {loading && <p className="text-sm text-text-secondary-light">Carregando…</p>}
                     {!loading && sales.length === 0 && (

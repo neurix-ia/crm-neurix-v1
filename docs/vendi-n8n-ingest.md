@@ -1,15 +1,15 @@
 # Vendi — ingest n8n → CRM
 
+**Status:** integrado no workflow **VENDI - Registro de Venda de Rua** (`ERMqbe3LFvgeGYOe`) — nós `Preparar Payload CRM Neurix` + `Enviar CRM Neurix` (após Data Table; `continueOnFail` se o CRM falhar).
+
 O app do vendedor continua enviando base64 para o webhook:
 
 `POST https://n8n-neurix-1.wbtech.dev/webhook/vendi-registro`
 
-O workflow **VENDI - Registro de Venda de Rua** (`ERMqbe3LFvgeGYOe`) deve, após STT + upload Storage:
+O workflow, após STT + Twenty + Data Table:
 
-1. Extrair telefone da transcrição (se houver áudio).
-2. Definir `phone_final`: áudio se válido, senão digitado.
-3. Definir `match_status`: `match` | `mismatch` | `audio_only` | `typed_only` | `no_phone`.
-4. Chamar o CRM:
+1. Extrai telefone (digitado / falado) e define `match_status`.
+2. Chama o CRM:
 
 ```
 POST {CRM_BASE_URL}/api/n8n/vendi
@@ -29,16 +29,22 @@ Content-Type: application/json
   "phone_final": "41999999999",
   "match_status": "match",
   "transcript": "texto do whisper...",
-  "photo_url": "https://.../placa.jpg",
-  "audio_url": "https://.../audio.webm",
+  "photo_url": null,
+  "audio_url": null,
   "pao_italiano_qtd": 2,
   "pao_integral_qtd": 1,
   "sold_at": "2026-07-21T15:30:00.000Z",
   "geolocation": null,
-  "metadata": {},
+  "metadata": {
+    "source": "n8n-vendi",
+    "placa": "ABC1D23",
+    "twenty_person_id": "..."
+  },
   "client_display_name": null
 }
 ```
+
+Nesta entrega `photo_url` / `audio_url` ficam `null` (base64 permanece na Data Table). Upload Storage no Neurix: fora de escopo (ver SPEC `docs/superpowers/specs/2026-07-22-vendi-crm-sync-design.md`).
 
 ## Resposta
 
@@ -55,17 +61,16 @@ Content-Type: application/json
 
 Se `match_status` / `phone_final` forem omitidos, o CRM deriva a partir de `phone_typed` e `phone_from_audio` (áudio tem prioridade sobre digitado).
 
-## Passo a passo no n8n (MCP bloqueado neste workflow)
+## Env / credenciais no n8n
 
-1. Abrir workflow **VENDI - Registro de Venda de Rua**.
-2. Após STT + upload, adicionar **Code** com o conteúdo de [`docs/vendi-n8n-code-node.js`](vendi-n8n-code-node.js).
-3. Adicionar **HTTP Request**:
-   - Method: POST
-   - URL: `{{$env.CRM_API_URL}}/api/n8n/vendi` (ex. `https://crm.../api/n8n/vendi`)
-   - Header `X-CRM-API-Key` = credencial/`N8N_API_KEY`
-   - Body: JSON do Code node
-4. Definir env `VENDI_TENANT_ID` (uuid do tenant Levíssimo) se o Code usar `$env.VENDI_TENANT_ID`.
-5. Publicar o workflow.
+| Item | Uso |
+|------|-----|
+| `$env.CRM_API_URL` | Base do CRM (ex. `https://crm.wbtech.dev`) |
+| `$env.VENDI_TENANT_ID` | UUID do tenant Levíssimo |
+| `$env.N8N_API_KEY` | Valor do header `X-CRM-API-Key` (mesmo `N8N_API_KEY` do backend) |
 
-Para editar via MCP depois: em Settings do workflow, habilitar **Available in MCP**.
+Definir essas variáveis nas **Settings → Variables** da instância n8n (ou env do container). O nó `Enviar CRM Neurix` usa `onError: continueRegularOutput` para não derrubar Twenty/Data Table se o CRM falhar.
 
+## Referência do Code node
+
+Trecho reutilizável: [`docs/vendi-n8n-code-node.js`](vendi-n8n-code-node.js) (ajustado no workflow aos campos reais: `vendedor`, `cliente_whatsapp_*`, `transcricao`, `timestamp_venda`, `placa`, `twenty_person_id`).
