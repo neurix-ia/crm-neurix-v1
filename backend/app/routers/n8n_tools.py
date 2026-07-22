@@ -5,6 +5,7 @@ Endpoints para ferramentas do agente n8n (API key, sem JWT).
 - GET /api/n8n/tools/last-order-by-phone — busca_ultimo_pedido
 - GET /api/n8n/tools/lead-context — estágio do lead no CRM (roteamento sem Redis)
 - GET /api/n8n/tools/dispatch-targets — targets pendentes do disparador
+- POST /api/n8n/tools/dispatch-execution — registra execution_id n8n na campanha
 - POST /api/n8n/tools/dispatch-target-status — atualiza status de envio
 - POST /api/n8n/tools/dispatch-complete — finaliza campanha
 
@@ -174,6 +175,11 @@ class DispatchCompleteBody(BaseModel):
     campaign_id: str
 
 
+class DispatchExecutionBody(BaseModel):
+    campaign_id: str
+    execution_id: str
+
+
 @router.get("/tools/dispatch-targets")
 async def n8n_tool_dispatch_targets(
     campaign_id: str = Query(..., min_length=1),
@@ -185,7 +191,7 @@ async def n8n_tool_dispatch_targets(
     """Lista targets pendentes de uma campanha para o workflow disparador."""
     camp_res = (
         supabase.table("dispatch_campaigns")
-        .select("id,message,min_delay,max_delay,instance_token")
+        .select("id,message,min_delay,max_delay,instance_token,status")
         .eq("id", campaign_id)
         .limit(1)
         .execute()
@@ -194,6 +200,17 @@ async def n8n_tool_dispatch_targets(
     if not camps:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campanha não encontrada.")
     campaign = camps[0]
+
+    if (campaign.get("status") or "") == "cancelled":
+        return {
+            "campaign_id": campaign_id,
+            "message": campaign.get("message") or "",
+            "min_delay": campaign.get("min_delay") or 180,
+            "max_delay": campaign.get("max_delay") or 540,
+            "instance_token": campaign.get("instance_token"),
+            "cancelled": True,
+            "targets": [],
+        }
 
     targets_res = (
         supabase.table("dispatch_targets")
@@ -220,6 +237,31 @@ async def n8n_tool_dispatch_targets(
         "instance_token": campaign.get("instance_token"),
         "targets": targets,
     }
+
+
+@router.post("/tools/dispatch-execution")
+async def n8n_tool_dispatch_execution(
+    body: DispatchExecutionBody,
+    _caller: dict = Depends(verify_n8n_api_key),
+    supabase: SupabaseClient = Depends(get_supabase),
+):
+    """Registra o execution_id n8n na campanha (chamar no início do workflow)."""
+    from app.services.dispatch_service import save_campaign_execution_id
+
+    camp_res = (
+        supabase.table("dispatch_campaigns")
+        .select("id")
+        .eq("id", body.campaign_id)
+        .limit(1)
+        .execute()
+    )
+    if not camp_res.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campanha não encontrada.")
+    eid = (body.execution_id or "").strip()
+    if not eid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="execution_id obrigatório.")
+    save_campaign_execution_id(supabase, body.campaign_id, eid)
+    return {"ok": True, "campaign_id": body.campaign_id, "execution_id": eid}
 
 
 @router.post("/tools/dispatch-target-status")
