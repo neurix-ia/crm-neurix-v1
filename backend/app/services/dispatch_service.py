@@ -165,7 +165,7 @@ def resolve_dispatch_n8n_client(settings: Settings | None = None) -> Optional[N8
         for cfg in instances:
             if urlparse(cfg.base_url).netloc.lower() == host:
                 return N8nInstanceClient(cfg, verify_ssl=settings.N8N_SSL_VERIFY)
-    return N8nInstanceClient(instances[0], verify_ssl=settings.N8N_SSL_VERIFY)
+    return None
 
 
 async def cancel_n8n_execution(execution_id: str) -> dict[str, Any]:
@@ -182,10 +182,11 @@ async def cancel_n8n_execution(execution_id: str) -> dict[str, Any]:
     try:
         await client.stop_execution(execution_id)
         stopped = True
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            err = f"stop: {exc}"
     except Exception as exc:
-        msg = str(exc)
-        if "404" not in msg and "Not Found" not in msg:
-            err = f"stop: {msg}"
+        err = f"stop: {exc}"
     try:
         await client.delete_execution(execution_id)
         deleted = True

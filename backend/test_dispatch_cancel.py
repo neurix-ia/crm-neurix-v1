@@ -48,6 +48,15 @@ class TestResolveDispatchClient(unittest.TestCase):
         self.assertIsNotNone(client)
         self.assertEqual(client.config.id, "wb")
 
+    def test_resolve_no_match_returns_none(self):
+        settings = Settings(
+            N8N_DISPATCH_INSTANCE_ID="other",
+            N8N_DISPATCH_WEBHOOK_URL="https://unknown.example/webhook/x",
+            N8N_INSTANCES='[{"id":"wb","label":"WB","base_url":"https://n8n.example","api_key":"k"}]',
+        )
+        client = resolve_dispatch_n8n_client(settings)
+        self.assertIsNone(client)
+
 
 class TestCancelN8nExecution(unittest.IsolatedAsyncioTestCase):
     async def test_stop_then_delete(self):

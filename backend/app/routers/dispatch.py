@@ -368,9 +368,19 @@ async def cancel_campaign(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    supabase.table("dispatch_campaigns").update(
-        {"status": "cancelled", "finished_at": now, "updated_at": now}
-    ).eq("id", str(campaign_id)).eq("tenant_id", tid).execute()
+    update_res = (
+        supabase.table("dispatch_campaigns")
+        .update({"status": "cancelled", "finished_at": now, "updated_at": now})
+        .eq("id", str(campaign_id))
+        .eq("tenant_id", tid)
+        .eq("status", "running")
+        .execute()
+    )
+    if not (update_res.data or []):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Só é possível cancelar campanhas em andamento.",
+        )
 
     n8n_stopped = False
     n8n_deleted = False
