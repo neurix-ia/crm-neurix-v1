@@ -173,11 +173,11 @@ async def list_vendi_sales(
     since_id: Optional[str] = Query(None),
     tenant_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=500),
-    user: dict = Depends(get_current_user),
+    user=Depends(get_current_user),
     eff: EffectiveRole = Depends(get_effective_role),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
-    tid = _resolve_tenant(supabase, eff, user["id"], tenant_id)
+    tid = _resolve_tenant(supabase, eff, str(user.id), tenant_id)
     if since is not None:
         rows = _fetch_sales(
             supabase, tid, from_ts=None, to_ts=None, since=since, since_id=since_id, limit=limit
@@ -209,11 +209,11 @@ async def export_vendi_sales(
     from_ts: Optional[datetime] = Query(None, alias="from"),
     to_ts: Optional[datetime] = Query(None, alias="to"),
     tenant_id: Optional[str] = Query(None),
-    user: dict = Depends(get_current_user),
+    user=Depends(get_current_user),
     eff: EffectiveRole = Depends(get_effective_role),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
-    tid = _resolve_tenant(supabase, eff, user["id"], tenant_id)
+    tid = _resolve_tenant(supabase, eff, str(user.id), tenant_id)
     f, t = _period_bounds(period, from_ts, to_ts)
     rows = _fetch_sales(supabase, tid, from_ts=f, to_ts=t, since=None, since_id=None, limit=500)
     names = _client_names(supabase, [str(r.get("client_id") or "") for r in rows])
@@ -274,11 +274,11 @@ async def export_vendi_sales(
 async def get_vendi_sale(
     sale_id: str,
     tenant_id: Optional[str] = Query(None),
-    user: dict = Depends(get_current_user),
+    user=Depends(get_current_user),
     eff: EffectiveRole = Depends(get_effective_role),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
-    tid = _resolve_tenant(supabase, eff, user["id"], tenant_id)
+    tid = _resolve_tenant(supabase, eff, str(user.id), tenant_id)
     try:
         res = (
             supabase.table("street_sales")
@@ -306,12 +306,12 @@ async def list_vendi_active_clients(
     to_ts: Optional[datetime] = Query(None, alias="to"),
     tenant_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
-    user: dict = Depends(get_current_user),
+    user=Depends(get_current_user),
     eff: EffectiveRole = Depends(get_effective_role),
     supabase: SupabaseClient = Depends(get_supabase),
 ):
     """Clientes com pelo menos uma street_sale no período (default: últimos 90 dias)."""
-    tid = _resolve_tenant(supabase, eff, user["id"], tenant_id)
+    tid = _resolve_tenant(supabase, eff, str(user.id), tenant_id)
     if not from_ts:
         from_ts = datetime.now(timezone.utc) - timedelta(days=90)
 

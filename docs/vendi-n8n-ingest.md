@@ -61,15 +61,15 @@ Nesta entrega `photo_url` / `audio_url` ficam `null` (base64 permanece na Data T
 
 Se `match_status` / `phone_final` forem omitidos, o CRM deriva a partir de `phone_typed` e `phone_from_audio` (áudio tem prioridade sobre digitado).
 
-## Env / credenciais no n8n
+## Auth / URLs (self-hosted, sem env vars)
 
-| Item | Uso |
-|------|-----|
-| `$env.CRM_API_URL` | Base do CRM (ex. `https://crm.wbtech.dev`) |
-| `$env.VENDI_TENANT_ID` | UUID do tenant Levíssimo |
-| `$env.N8N_API_KEY` | Valor do header `X-CRM-API-Key` (mesmo `N8N_API_KEY` do backend) |
+| Item | Valor |
+|------|--------|
+| URL HTTP | `https://crm.wbtech.dev/api/n8n/vendi` (fixa no nó) |
+| Auth | Generic → **Header Auth** → credencial **CRM API Key** |
+| `tenant_id` | Constante `TENANT_ID` no nó **Preparar Payload CRM Neurix** (UUID Levíssimo) |
 
-Definir essas variáveis nas **Settings → Variables** da instância n8n (ou env do container). O nó `Enviar CRM Neurix` usa `onError: continueRegularOutput` para não derrubar Twenty/Data Table se o CRM falhar.
+O MCP não consegue anexar `httpHeaderAuth` via API — selecionar a credencial **CRM API Key** no nó `Enviar CRM Neurix` na UI (Authentication já está em Header Auth).
 
 ## Referência do Code node
 

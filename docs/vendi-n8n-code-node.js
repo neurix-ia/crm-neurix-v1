@@ -1,13 +1,14 @@
 /**
  * Trecho para colar no n8n (Code node) antes do HTTP Request → CRM.
- * Entrada: Consolidar Registro / Preparar Registro Final / Normalizar Dados.
- *
- * Ajuste TENANT_ID via $env.VENDI_TENANT_ID.
+ * Self-hosted: sem $env — edite TENANT_ID abaixo.
  */
 
 function digitsOnly(v) {
   return String(v || "").replace(/\D/g, "");
 }
+
+// UUID do admin/tenant Levíssimo no Neurix
+const TENANT_ID = "REPLACE_LEVISSIMO_TENANT_UUID";
 
 const base = $("Preparar Registro Final").first().json;
 const typed = digitsOnly(base.cliente_whatsapp_digitado || "");
@@ -25,10 +26,14 @@ else match_status = "no_phone";
 
 if (!phone_final) phone_final = typed || fromAudio || "";
 
+if (!TENANT_ID || TENANT_ID.includes("REPLACE")) {
+  throw new Error("Defina TENANT_ID (UUID Levíssimo) no nó Preparar Payload CRM Neurix");
+}
+
 return [
   {
     json: {
-      tenant_id: $env.VENDI_TENANT_ID,
+      tenant_id: TENANT_ID,
       seller_name: base.vendedor || "vendedor",
       seller_user_id: null,
       phone_typed: typed || null,
