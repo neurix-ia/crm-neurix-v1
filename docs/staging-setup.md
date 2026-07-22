@@ -225,6 +225,17 @@ SMTP_PASS=<brevo>
 
 EU pode atualizar docs/prompts em `n8n/` referenciando variáveis por ambiente.
 
+### Cancelamento de campanha (disparador) — ops
+
+Pré-requisito para o botão **Cancelar envio** (Comunicados) funcionar de ponta a ponta:
+
+- [ ] Rodar migration `backend/migrations/023_dispatch_cancel.sql` no ambiente (adiciona `n8n_execution_id` e status `cancelled` em `dispatch_campaigns`).
+- [ ] `N8N_INSTANCES` deve incluir uma entrada cujo `base_url` seja o **host do n8n que roda o workflow "Disparador CRM Simple"** (webhook `disparador-crm-start`) — sem isso, `stop`/`delete` da execução falham mesmo com `n8n_execution_id` salvo.
+- [ ] `N8N_DISPATCH_INSTANCE_ID` = o `id` (dentro de `N8N_INSTANCES`) que corresponde a esse host. Se vazio, o cancelamento atualiza só o CRM (sem parar a execução no n8n).
+- [x] Workflow **"Disparador CRM Simple (multi-tenant)"** chama `POST /api/n8n/tools/dispatch-execution` (nó **Register Execution**) logo após o Webhook Start, gravando `campaign_id` + `$execution.id` no CRM. `onError: continueRegularOutput` — falha nesse registro não derruba o disparo.
+
+Sem isso, campanhas antigas (ou se o callback falhar) ainda cancelam **só no CRM** — comportamento esperado, não é bug.
+
 ---
 
 ## Fase 8 — WhatsApp / Uazapi (VOCÊ)
