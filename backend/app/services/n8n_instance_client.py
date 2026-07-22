@@ -82,6 +82,12 @@ class N8nInstanceClient:
         params = {"includeData": "true" if include_data else "false"}
         return await self._get_json(f"/api/v1/executions/{execution_id}", params=params)
 
+    async def stop_execution(self, execution_id: str) -> dict[str, Any]:
+        return await self._request_json("POST", f"/api/v1/executions/{execution_id}/stop")
+
+    async def delete_execution(self, execution_id: str) -> dict[str, Any]:
+        return await self._request_json("DELETE", f"/api/v1/executions/{execution_id}")
+
     async def get_workflow(self, workflow_id: str) -> dict[str, Any]:
         return await self._get_json(f"/api/v1/workflows/{workflow_id}")
 
@@ -133,12 +139,30 @@ class N8nInstanceClient:
             params["filter"] = json.dumps({"parentFolderId": parent_folder_id})
         return await self._get_json(f"/api/v1/projects/{project_id}/folders", params=params)
 
-    async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[dict[str, str]] = None,
+        json_body: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         url = f"{self._base}{path}"
         async with httpx.AsyncClient(timeout=N8N_REQUEST_TIMEOUT, verify=self._verify_ssl) as client:
-            response = await client.get(url, headers=self._headers(), params=params)
+            response = await client.request(
+                method,
+                url,
+                headers=self._headers(),
+                params=params,
+                json=json_body,
+            )
             response.raise_for_status()
+            if response.status_code == 204 or not (response.content or b"").strip():
+                return {}
             data = response.json()
             if not isinstance(data, dict):
                 raise ValueError(f"Resposta inesperada de {url}")
             return data
+
+    async def _get_json(self, path: str, params: Optional[dict[str, str]] = None) -> dict[str, Any]:
+        return await self._request_json("GET", path, params=params)
